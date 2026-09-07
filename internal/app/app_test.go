@@ -373,8 +373,8 @@ func TestHandleKoboGet(t *testing.T) {
 					}
 				case "incremental sync with newly archived":
 					item := resp.List["1"]
-					if item.Status != "1" {
-						t.Errorf("expected archived item status to be '1', got '%s'", item.Status)
+					if item.Status != "2" {
+						t.Errorf("expected archived item status to be '2' (pr #3 behavior: remove from My Articles), got '%s'", item.Status)
 					}
 				case "full sync with image item":
 					item := resp.List["1"]
