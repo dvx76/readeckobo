@@ -26,6 +26,19 @@ func ListenAndServe(port int, application *app.App, logger *logger.Logger) {
 	mux.HandleFunc("/instapaper-proxy/instapaper/api/kobo/download", application.HandleKoboDownload)
 	mux.HandleFunc("/instapaper-proxy/instapaper/api/kobo/send", application.HandleKoboSend)
 
+	// The Kobo client resolves these endpoints relative to its configured
+	// instapaper_env_url base, which may be the host root or the proxy
+	// prefix. Register the bare (Pocket-style) aliases and their prefixed
+	// equivalents so the device's calls match regardless of the base.
+	mux.HandleFunc("/get", application.HandleKoboGet)
+	mux.HandleFunc("/send", application.HandleKoboSend)
+	mux.HandleFunc("/text", application.HandleKoboDownload)
+	mux.HandleFunc("/download", application.HandleKoboDownload)
+	mux.HandleFunc("/instapaper-proxy/instapaper/get", application.HandleKoboGet)
+	mux.HandleFunc("/instapaper-proxy/instapaper/send", application.HandleKoboSend)
+	mux.HandleFunc("/instapaper-proxy/instapaper/text", application.HandleKoboDownload)
+	mux.HandleFunc("/instapaper-proxy/instapaper/download", application.HandleKoboDownload)
+
 	// Catch-all for unimplemented routes
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		logger.Warnf("404 Not Found: URL=%s, Method=%s, Params=%v", r.URL.Path, r.Method, r.URL.Query())

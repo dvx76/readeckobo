@@ -214,9 +214,27 @@ func (a *App) HandleKoboGet(w http.ResponseWriter, r *http.Request) {
 
 	var req models.KoboGetRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "Invalid request body", http.StatusBadRequest)
-		a.Logger.Errorf("Error decoding /api/kobo/get request: %v, body: %s, URL: %s, Params: %v", err, string(bodyBytes), r.URL.Path, r.URL.Query())
-		return
+		// Fall back to form-encoded bodies (Pocket API style) if the body
+		// is not JSON.
+		if formErr := r.ParseForm(); formErr == nil {
+			req.AccessToken = r.FormValue("access_token")
+			req.ConsumerKey = r.FormValue("consumer_key")
+			req.ContentType = r.FormValue("contentType")
+			req.Count = r.FormValue("count")
+			req.DetailType = r.FormValue("detailType")
+			req.Offset = r.FormValue("offset")
+			req.State = r.FormValue("state")
+			req.Total = r.FormValue("total")
+			if sinceStr := r.FormValue("since"); sinceStr != "" {
+				if sinceVal, parseErr := strconv.ParseFloat(sinceStr, 64); parseErr == nil {
+					req.Since = sinceVal
+				}
+			}
+		} else {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			a.Logger.Errorf("Error decoding /api/kobo/get request: %v, body: %s, URL: %s, Params: %v", err, string(bodyBytes), r.URL.Path, r.URL.Query())
+			return
+		}
 	}
 
 	readeckToken, err := a.getReadeckToken(req.AccessToken)
