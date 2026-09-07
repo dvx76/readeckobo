@@ -443,6 +443,19 @@ func (a *App) HandleKoboDownload(w http.ResponseWriter, r *http.Request) {
 			for _, attr := range n.Attr {
 				if attr.Key == "src" {
 					src := attr.Val
+					// Kobo only renders JPEG images; route everything else
+					// through the local conversion endpoint (kobeck parity).
+					if !strings.HasSuffix(strings.ToLower(src), ".jpg") && !strings.HasSuffix(strings.ToLower(src), ".jpeg") {
+						scheme := r.Header.Get("X-Forwarded-Proto")
+						if scheme == "" {
+							scheme = "http"
+						}
+						host := r.Header.Get("Host")
+						if host == "" {
+							host = r.Host
+						}
+						src = fmt.Sprintf("%s://%s/api/convert-image?url=%s", scheme, host, url.QueryEscape(attr.Val))
+					}
 					images[fmt.Sprintf("%d", imageIndex)] = map[string]any{
 						"image_id": fmt.Sprintf("%d", imageIndex),
 						"item_id":  fmt.Sprintf("%d", imageIndex),
