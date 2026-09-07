@@ -3,6 +3,7 @@ package readeck
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -71,31 +72,78 @@ func TestGetBookmarks(t *testing.T) {
 		if r.URL.Query().Get("site") != "example.com" {
 			t.Errorf("Expected site query parameter 'example.com', got '%s'", r.URL.Query().Get("site"))
 		}
-		        if r.URL.Query().Get("page") != "1" {
-		            t.Errorf("Expected page query parameter '1', got '%s'", r.URL.Query().Get("page"))
-		        }
-		
-		        mockResponse := []Bookmark{
-		            {ID: "b1", Title: "Test Bookmark"},
-		        }
-		        w.Header().Set("Total-Pages", "1")
-		        if err := json.NewEncoder(w).Encode(mockResponse); err != nil {
-		            t.Fatalf("Failed to encode response: %v", err)
-		        }
-		    }))
-		    defer server.Close()
-		
-		    client, _ := NewClient(server.URL, "test-token", testLogger, nil)
-		    ctx := context.Background()
-	bookmarks, totalPages, err := client.GetBookmarks(ctx, "example.com", 1, nil)
+		if r.URL.Query().Get("limit") != "50" {
+			t.Errorf("Expected limit query parameter '50', got '%s'", r.URL.Query().Get("limit"))
+		}
+		if r.URL.Query().Get("offset") != "0" {
+			t.Errorf("Expected offset query parameter '0', got '%s'", r.URL.Query().Get("offset"))
+		}
+
+		mockResponse := []Bookmark{
+			{ID: "b1", Title: "Test Bookmark"},
+		}
+		// No Link header => no rel="next" => single page.
+		if err := json.NewEncoder(w).Encode(mockResponse); err != nil {
+			t.Fatalf("Failed to encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
+
+	bookmarks, err := client.GetBookmarks(ctx, "example.com", nil)
 	if err != nil {
 		t.Fatalf("GetBookmarks failed: %v", err)
 	}
 	if len(bookmarks) != 1 || bookmarks[0].ID != "b1" {
 		t.Errorf("Expected 1 bookmark with ID 'b1', got %+v", bookmarks)
 	}
-	if totalPages != 1 {
-		t.Errorf("Expected totalPages to be 1, got %d", totalPages)
+}
+
+func TestGetBookmarksPagination(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		if r.URL.Path != "/api/bookmarks" {
+			t.Errorf("Expected to request '/api/bookmarks', got '%s'", r.URL.Path)
+		}
+		offset := r.URL.Query().Get("offset")
+		base := "https://" + r.Host + "/api/bookmarks?limit=50&offset=%d"
+		switch requestCount {
+		case 1:
+			if offset != "0" {
+				t.Errorf("Expected first request offset '0', got '%s'", offset)
+			}
+			w.Header().Set("Link", fmt.Sprintf("<%s>; rel=\"first\", <%s>; rel=\"next\", <%s>; rel=\"last\"", fmt.Sprintf(base, 0), fmt.Sprintf(base, 50), fmt.Sprintf(base, 50)))
+			if err := json.NewEncoder(w).Encode([]Bookmark{{ID: "b1"}}); err != nil {
+				t.Fatalf("Failed to encode response: %v", err)
+			}
+		case 2:
+			if offset != "50" {
+				t.Errorf("Expected second request offset '50', got '%s'", offset)
+			}
+			if err := json.NewEncoder(w).Encode([]Bookmark{{ID: "b2"}}); err != nil {
+				t.Fatalf("Failed to encode response: %v", err)
+			}
+		default:
+			t.Errorf("Unexpected extra request #%d", requestCount)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
+
+	bookmarks, err := client.GetBookmarks(ctx, "example.com", nil)
+	if err != nil {
+		t.Fatalf("GetBookmarks failed: %v", err)
+	}
+	if len(bookmarks) != 2 || bookmarks[0].ID != "b1" || bookmarks[1].ID != "b2" {
+		t.Errorf("Expected both pages aggregated, got %+v", bookmarks)
+	}
+	if requestCount != 2 {
+		t.Errorf("Expected exactly 2 requests, got %d", requestCount)
 	}
 }
 
@@ -232,8 +280,8 @@ func TestGetBookmarksWithIsArchived(t *testing.T) {
 		if r.URL.Query().Get("site") != "example.com" {
 			t.Errorf("Expected site query parameter 'example.com', got '%s'", r.URL.Query().Get("site"))
 		}
-		if r.URL.Query().Get("page") != "1" {
-			t.Errorf("Expected page query parameter '1', got '%s'", r.URL.Query().Get("page"))
+		if r.URL.Query().Get("offset") != "0" {
+			t.Errorf("Expected offset query parameter '0', got '%s'", r.URL.Query().Get("offset"))
 		}
 		if r.URL.Query().Get("is_archived") != "false" {
 			t.Errorf("Expected is_archived query parameter 'false', got '%s'", r.URL.Query().Get("is_archived"))
@@ -242,7 +290,6 @@ func TestGetBookmarksWithIsArchived(t *testing.T) {
 		mockResponse := []Bookmark{
 			{ID: "b1", Title: "Test Bookmark"},
 		}
-		w.Header().Set("Total-Pages", "1")
 		if err := json.NewEncoder(w).Encode(mockResponse); err != nil {
 			t.Fatalf("Failed to encode response: %v", err)
 		}
@@ -253,14 +300,11 @@ func TestGetBookmarksWithIsArchived(t *testing.T) {
 	ctx := context.Background()
 
 	isArchived := false
-	bookmarks, totalPages, err := client.GetBookmarks(ctx, "example.com", 1, &isArchived)
+	bookmarks, err := client.GetBookmarks(ctx, "example.com", &isArchived)
 	if err != nil {
 		t.Fatalf("GetBookmarks failed: %v", err)
 	}
 	if len(bookmarks) != 1 || bookmarks[0].ID != "b1" {
 		t.Errorf("Expected 1 bookmark with ID 'b1', got %+v", bookmarks)
-	}
-	if totalPages != 1 {
-		t.Errorf("Expected totalPages to be 1, got %d", totalPages)
 	}
 }

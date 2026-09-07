@@ -8,7 +8,7 @@ import (
 // ClientInterface defines the interface for the Readeck API client.
 type ClientInterface interface {
 	GetBookmarksSync(ctx context.Context, since *time.Time) ([]BookmarkSync, error)
-	GetBookmarks(ctx context.Context, site string, page int, isArchived *bool) ([]Bookmark, int, error)
+	GetBookmarks(ctx context.Context, site string, isArchived *bool) ([]Bookmark, error)
 	GetBookmarkDetails(ctx context.Context, id string) (*Bookmark, error)
 	SyncBookmarksContent(ctx context.Context, ids []string) (map[string]*Bookmark, error)
 	GetBookmarkArticle(ctx context.Context, id string) (string, error)

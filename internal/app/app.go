@@ -389,35 +389,27 @@ func (a *App) HandleKoboDownload(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	for _, site := range sitesToTry {
-		currentPage := 1
-		totalPages := 1
+		// GetBookmarks follows Readeck's Link rel="next" pagination, so a
+		// single call returns all (non-archived) bookmarks for the site.
+		isArchived := false
+		bookmarks, err := readeckClient.GetBookmarks(ctx, site, &isArchived)
+		if err != nil {
+			a.Logger.Warnf("Error searching Readeck bookmarks for site %s in /api/kobo/download: %v, URL: %s, Params: %v", site, err, r.URL.Path, r.URL.Query())
+			continue
+		}
 
-		for currentPage <= totalPages {
-			isArchived := false
-			bookmarks, tp, err := readeckClient.GetBookmarks(ctx, site, currentPage, &isArchived)
-			if err != nil {
-				a.Logger.Warnf("Error searching Readeck bookmarks for site %s, page %d in /api/kobo/download: %v, URL: %s, Params: %v", site, currentPage, err, r.URL.Path, r.URL.Query())
-				break
-			}
-			totalPages = tp
-
-			for i := range bookmarks {
-				if bookmarks[i].URL != "" {
-					match, err := compareURLs(bookmarks[i].URL, reqURLStr)
-					if err != nil {
-						a.Logger.Warnf("Error comparing URLs for bookmark %s in /api/kobo/download: %v, URL: %s, Params: %v", bookmarks[i].ID, err, r.URL.Path, r.URL.Query())
-						continue
-					}
-					if match {
-						bookmarkFound = &bookmarks[i]
-						break
-					}
+		for i := range bookmarks {
+			if bookmarks[i].URL != "" {
+				match, err := compareURLs(bookmarks[i].URL, reqURLStr)
+				if err != nil {
+					a.Logger.Warnf("Error comparing URLs for bookmark %s in /api/kobo/download: %v, URL: %s, Params: %v", bookmarks[i].ID, err, r.URL.Path, r.URL.Query())
+					continue
+				}
+				if match {
+					bookmarkFound = &bookmarks[i]
+					break
 				}
 			}
-			if bookmarkFound != nil {
-				break
-			}
-			currentPage++
 		}
 		if bookmarkFound != nil {
 			break

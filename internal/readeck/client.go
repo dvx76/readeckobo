@@ -100,7 +100,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, queryParams
 		}
 	}
 
-	totalPages := resp.Header.Get("Total-Pages")
+	totalPages := resp.Header.Get("Link")
 	return totalPages, nil
 }
 
@@ -238,33 +238,69 @@ func (c *Client) GetBookmarksSync(ctx context.Context, since *time.Time) ([]Book
 	return bookmarks, nil
 }
 
-// GetBookmarks fetches bookmarks for a specific site.
-// This implementation does not handle pagination yet, it only fetches the first page.
-// Pagination will be added later if needed.
-func (c *Client) GetBookmarks(ctx context.Context, site string, page int, isArchived *bool) ([]Bookmark, int, error) {
-	queryParams := url.Values{}
-	if site != "" {
-		queryParams.Add("site", site)
-	}
-	if page > 0 {
-		queryParams.Add("page", strconv.Itoa(page))
-	}
-	if isArchived != nil {
-		queryParams.Add("is_archived", strconv.FormatBool(*isArchived))
+// GetBookmarks fetches all bookmarks for a site (optionally filtered by
+// is_archived), following Readeck's Link rel="next" pagination (limit/offset).
+// Note: Readeck ignores the legacy `page` query param, so a page-based loop
+// would silently rescan the first page forever.
+func (c *Client) GetBookmarks(ctx context.Context, site string, isArchived *bool) ([]Bookmark, error) {
+	var all []Bookmark
+	offset := 0
+
+	for {
+		queryParams := url.Values{}
+		if site != "" {
+			queryParams.Add("site", site)
+		}
+		queryParams.Add("limit", "50")
+		queryParams.Add("offset", strconv.Itoa(offset))
+		if isArchived != nil {
+			queryParams.Add("is_archived", strconv.FormatBool(*isArchived))
+		}
+
+		var bookmarks []Bookmark
+		linkHeader, err := c.doRequest(ctx, http.MethodGet, "/api/bookmarks", queryParams, nil, &bookmarks)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch bookmarks: %w", err)
+		}
+		all = append(all, bookmarks...)
+
+		nextOffset := nextOffsetFromLink(linkHeader)
+		if nextOffset == nil {
+			break
+		}
+		offset = *nextOffset
 	}
 
-	var bookmarks []Bookmark
-	totalPagesStr, err := c.doRequest(ctx, http.MethodGet, "/api/bookmarks", queryParams, nil, &bookmarks)
-	if err != nil {
-		return nil, 0, fmt.Errorf("failed to fetch bookmarks: %w", err)
-	}
+	return all, nil
+}
 
-	totalPages, err := strconv.Atoi(totalPagesStr)
-	if err != nil {
-		totalPages = 1 // Default to 1 if header is missing or invalid
+// nextOffsetFromLink parses a Link header and returns the "offset" query
+// parameter of the rel="next" link, or nil when there is no next page.
+func nextOffsetFromLink(linkHeader string) *int {
+	for _, part := range strings.Split(linkHeader, ",") {
+		if !strings.Contains(part, `rel="next"`) {
+			continue
+		}
+		start := strings.Index(part, "<")
+		end := strings.Index(part, ">")
+		if start == -1 || end == -1 {
+			continue
+		}
+		linkURL, err := url.Parse(strings.TrimSpace(part[start+1 : end]))
+		if err != nil {
+			return nil
+		}
+		offsetStr := linkURL.Query().Get("offset")
+		if offsetStr == "" {
+			return nil
+		}
+		offset, err := strconv.Atoi(offsetStr)
+		if err != nil {
+			return nil
+		}
+		return &offset
 	}
-
-	return bookmarks, totalPages, nil
+	return nil
 }
 
 // GetBookmarkDetails fetches details for a single bookmark.
