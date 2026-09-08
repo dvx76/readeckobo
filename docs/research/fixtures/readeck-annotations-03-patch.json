@@ -1,0 +1,88 @@
+{
+  "title": "PATCH annotation — color + note (selectors/offsets/text are immutable)",
+  "label": "t33-patch-color-note",
+  "note": "Captured on Readeck 0.23.2 (standalone binary, linux/arm64) against a local fixture article. Bookmark id and annotation ids are real but instance-local; the API token is redacted. See docs/research/readeck-annotations-api.md.",
+  "request": {
+    "method": "PATCH",
+    "path": "/api/bookmarks/{id}/annotations/{annotation_id}",
+    "headers": {
+      "Authorization": "Bearer <REDACTED-API-TOKEN>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "color": "purple",
+      "note": "patched note"
+    }
+  },
+  "response": {
+    "annotations": [
+      {
+        "id": "RBdkrpkM5GmHfZzgRdRKNR",
+        "start_selector": "/section/article/p[1]",
+        "start_offset": 0,
+        "end_selector": "/section/article/p[1]",
+        "end_offset": 55,
+        "color": "purple",
+        "created": "2026-09-08T05:50:51.754739108Z",
+        "text": "ALPHA one two three four five six seven eight nine ten.",
+        "note": "patched note"
+      },
+      {
+        "id": "J1o7XoGoj7LN1o8njRsurT",
+        "start_selector": "section/article/p[@id='uQ.GbYH.p-bravo']",
+        "start_offset": 6,
+        "end_selector": "section/article/p[@id='uQ.GbYH.p-bravo']",
+        "end_offset": 35,
+        "color": "red",
+        "created": "2026-09-08T05:51:35.629119586Z",
+        "text": "bold inside and italic inside",
+        "note": ""
+      },
+      {
+        "id": "5MteCp9zpuMrryg4Z1LVJw",
+        "start_selector": "section[1]/article[1]/p[3]",
+        "start_offset": 0,
+        "end_selector": "section[1]/article[1]/p[3]",
+        "end_offset": 61,
+        "color": "green",
+        "created": "2026-09-08T05:51:54.950679828Z",
+        "text": "CHARLIE delta echo foxtrot golf hotel india juliet kilo lima.",
+        "note": ""
+      },
+      {
+        "id": "5qnSzUzUv3JM7GzNe2mxK7",
+        "start_selector": "section/article/p[4]",
+        "start_offset": 0,
+        "end_selector": "section/article/p[4]",
+        "end_offset": 72,
+        "color": "blue",
+        "created": "2026-09-08T05:52:08.916782631Z",
+        "text": "DELTA mike november oscar papa quebec romeo sierra tango uniform victor.",
+        "note": ""
+      },
+      {
+        "id": "HrDpYWnvfAfoUg3eWCxQmP",
+        "start_selector": "section/article/p[5]",
+        "start_offset": 0,
+        "end_selector": "section/article/p[5]",
+        "end_offset": 61,
+        "color": "cyan",
+        "created": "2026-09-08T05:52:54.316550068Z",
+        "text": "ECHO whiskey xray yankee zulu alpha bravo charlie delta echo.",
+        "note": "This is my spike note"
+      },
+      {
+        "id": "CpvrTvJkGwi1jFbfBTtc2K",
+        "start_selector": "section/article/p[6]",
+        "start_offset": 0,
+        "end_selector": "section/article/p[6]",
+        "end_offset": 61,
+        "color": "none",
+        "created": "2026-09-08T05:52:24.356650968Z",
+        "text": "FOXTROT golf hotel india juliet kilo lima mike november oscar",
+        "note": ""
+      }
+    ],
+    "updated": "2026-09-08T05:53:25.661371959Z"
+  }
+}

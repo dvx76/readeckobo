@@ -1,0 +1,25 @@
+{
+  "title": "POST duplicate of existing highlight → 400 overlapping annotation",
+  "label": "t41-dup-second",
+  "note": "Captured on Readeck 0.23.2 (standalone binary, linux/arm64) against a local fixture article. Bookmark id and annotation ids are real but instance-local; the API token is redacted. See docs/research/readeck-annotations-api.md.",
+  "request": {
+    "method": "POST",
+    "path": "/api/bookmarks/{id}/annotations",
+    "headers": {
+      "Authorization": "Bearer <REDACTED-API-TOKEN>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "start_selector": "section/article/p[7]",
+      "start_offset": 0,
+      "end_selector": "section/article/p[7]",
+      "end_offset": 66,
+      "color": "orange",
+      "note": ""
+    }
+  },
+  "response": {
+    "status": 400,
+    "message": "overlapping annotation"
+  }
+}

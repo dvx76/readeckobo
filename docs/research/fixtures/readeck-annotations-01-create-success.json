@@ -1,0 +1,31 @@
+{
+  "title": "POST create annotation — id-based XPath selector, span crossing nested <strong>/<em>",
+  "label": "t16-8c-id-workable",
+  "note": "Captured on Readeck 0.23.2 (standalone binary, linux/arm64) against a local fixture article. Bookmark id and annotation ids are real but instance-local; the API token is redacted. See docs/research/readeck-annotations-api.md.",
+  "request": {
+    "method": "POST",
+    "path": "/api/bookmarks/{id}/annotations",
+    "headers": {
+      "Authorization": "Bearer <REDACTED-API-TOKEN>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "start_selector": "section/article/p[@id='uQ.GbYH.p-bravo']",
+      "start_offset": 6,
+      "end_selector": "section/article/p[@id='uQ.GbYH.p-bravo']",
+      "end_offset": 35,
+      "color": "red"
+    }
+  },
+  "response": {
+    "id": "J1o7XoGoj7LN1o8njRsurT",
+    "start_selector": "section/article/p[@id='uQ.GbYH.p-bravo']",
+    "start_offset": 6,
+    "end_selector": "section/article/p[@id='uQ.GbYH.p-bravo']",
+    "end_offset": 35,
+    "color": "red",
+    "created": "2026-09-08T05:51:35.629119586Z",
+    "text": "bold inside and italic inside",
+    "note": ""
+  }
+}

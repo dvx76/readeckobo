@@ -1,0 +1,22 @@
+{
+  "title": "PATCH bookmark reading progress (read_progress) — 200 shape",
+  "label": "t46-patch-progress",
+  "note": "Captured on Readeck 0.23.2 (standalone binary, linux/arm64) against a local fixture article. Bookmark id and annotation ids are real but instance-local; the API token is redacted. See docs/research/readeck-annotations-api.md.",
+  "request": {
+    "method": "PATCH",
+    "path": "/api/bookmarks/{id}",
+    "headers": {
+      "Authorization": "Bearer <REDACTED-API-TOKEN>",
+      "Content-Type": "application/json"
+    },
+    "body": {
+      "read_progress": 42
+    }
+  },
+  "response": {
+    "href": "http://127.0.0.1:8017/api/bookmarks/U9kyUWpFYbYwaXoK8WqLU",
+    "id": "U9kyUWpFYbYwaXoK8WqLU",
+    "read_progress": 42,
+    "updated": "2026-09-08T05:54:03.45708768Z"
+  }
+}

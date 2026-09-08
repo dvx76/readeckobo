@@ -5,6 +5,10 @@
 /readeckobo
 /coverage.out
 /coverage.html
+/dist/
+
+# Diagnostics scratch output (scripts/device-diagnostics.sh)
+/diag-out/
 
 # Vendored dependencies
 /vendor
