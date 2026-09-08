@@ -14,6 +14,9 @@ more.
 * 📋️ supports archiving, re-adding, favoriting, and deleting
 * 📷️ Converts images to JPEG format for e-reader compatibility
 * 👥 Supports multiple Kobo devices and readeck accounts
+* ✨ (beta) Kobo → Readeck **highlight sync**: articles as kepubs in a
+  Readeck collection, sorted by date added; highlights and notes made on the
+  device sync wirelessly back into Readeck. See [docs/HIGHLIGHTS.md](docs/HIGHLIGHTS.md).
 
 ## 🚀 Quick Start (for Users)
 
@@ -116,6 +119,23 @@ ensure this connection is preserved.
 
 Without these rules, your Kobo will eventually lose its connection to `readeckobo`.
 
+## ✨ Kobo → Readeck Highlight Sync (beta)
+
+Alongside the Instapaper-proxy flow, readeckobo can turn your Readeck articles
+into **kepubs** that live on the device in a **Readeck** collection (sorted by
+date added), and **sync highlights and notes you make while reading back into
+Readeck** — all over Wi-Fi.
+
+* Server side: nothing extra to configure (optional `server.data_dir` for the
+  state store).
+* Device side: install the agent once from a `KoboRoot.tgz`, add a two-line
+  config, and it runs in the background.
+
+For what it does, prerequisites, install, limitations, troubleshooting and the
+real-device validation checklist, see **[docs/HIGHLIGHTS.md](docs/HIGHLIGHTS.md)**.
+The full agent reference (build, config keys, wire contract, open questions)
+is in **[docs/AGENT.md](docs/AGENT.md)**.
+
 ## 🔒 A Quick Word on Security
 
 A little security goes a long way.
@@ -149,6 +169,9 @@ The server will be available at `http://localhost:8080`.
 | `POST /api/kobo/download` | downloads the content of an article for offline reading. |
 | `POST /api/kobo/send`     | handles archiving, favoriting, deleting, or adding new articles. |
 | `GET /api/convert-image`  | a helper endpoint to convert all article images to JPEG |
+| `GET /api/agent/state?device=<serial>` | (beta) agent state feed: article list with add/update/remove actions. |
+| `GET /api/kepub/{id}`     | (beta) the generated `.kepub.epub` for a bookmark. |
+| `POST /api/agent/annotations` | (beta) ingests device highlights/notes into Readeck. |
 <!-- markdownlint-enable MD013 -->
 
 ### Testing
@@ -169,4 +192,7 @@ The `Makefile` has some handy targets:
 * `make test`: Run all unit tests.
 * `make lint`: Run the linter.
 * `make vendor`: Vendor all dependencies.
+* `make fmt`: Check gofmt on tracked Go files (excludes `vendor/`).
+* `make agent` (alias `make dist`): Cross-compile the on-device agent and
+  build the `dist/agent/KoboRoot.tgz` installer.
 * `make ci`: Run all CI checks (linting and testing).

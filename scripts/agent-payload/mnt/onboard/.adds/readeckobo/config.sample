@@ -1,0 +1,18 @@
+# readeckobo agent — on-device configuration
+#
+# Copy this file to "config" in the same directory and fill in the values.
+# The agent reads config on every run, so changes apply on the next pass.
+#
+# REQUIRED
+SERVER_URL=https://your-host.example
+TOKEN=replace-with-your-token
+
+# OPTIONAL
+# DEVICE_SERIAL=      # Nickel serial; if unset the agent reports "unknown"
+COLLECTION=Readeck
+ARCHIVE_ON_FINISHED=false
+
+# NickelDBus rescan (advanced). QNDB_ARGS is space-separated.
+# QNDB_PATH=/usr/bin/qndb
+# QNDB_ARGS=-t 30000 -s pfmDoneProcessing -m pfmRescanBooksFull
+# HTTP_TIMEOUT=60s

@@ -1,0 +1,9 @@
+# Readeck sync agent: run the sync when a network interface comes up.
+#
+# Pattern from KoboCloud: Wi-Fi association creates wlan0 (and USB ethernet
+# adapters create eth*), which fires the "add" event. The RUN program detaches
+# into the background (see udev_program.sh) because udev kills slow scripts.
+#
+# Needs device validation on 4.38 (event names/timing) — see docs/AGENT.md.
+KERNEL=="wlan*", ACTION=="add", RUN+="/usr/local/readeckobo-agent/udev_program.sh"
+KERNEL=="eth*", ACTION=="add", RUN+="/usr/local/readeckobo-agent/udev_program.sh"

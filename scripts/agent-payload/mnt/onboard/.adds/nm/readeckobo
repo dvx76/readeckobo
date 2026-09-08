@@ -1,0 +1,9 @@
+# Readeck: optional NickelMenu entry — manual sync from the device.
+#
+# Copy this file to /mnt/onboard/.adds/nm/readeckobo (NickelMenu reads every
+# regular file in .adds/nm as config) and reboot, or use NickelMenu's own
+# config editor. It is NOT included in KoboRoot.tgz so it can never overwrite
+# an existing NickelMenu config.
+#
+# Requires NickelMenu to be installed. Requires firmware 4.x (not 5.x).
+menu_item :main :Sync Readeck :cmd_spawn :quiet:/usr/local/readeckobo-agent/readeckobo-agent --once --config /mnt/onboard/.adds/readeckobo/config

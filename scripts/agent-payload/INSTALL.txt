@@ -1,0 +1,28 @@
+readeckobo on-device agent — manual install notes
+=================================================
+
+This tarball is the "manual install" variant of the KoboRoot.tgz payload: it
+contains the same files plus samples you can copy over USB/ftp/telnet without
+triggering a firmware-style update and reboot.
+
+Layout
+------
+usr/local/readeckobo-agent/readeckobo-agent   the static armv7 binary
+usr/local/readeckobo-agent/start.sh           sync loop wrapper (network wait + retry)
+usr/local/readeckobo-agent/udev_program.sh    udev RUN helper (detaches into background)
+etc/udev/rules.d/98-readeckobo.rules          runs the agent on Wi-Fi association
+mnt/onboard/.adds/readeckobo/config.sample    config template
+mnt/onboard/.adds/nm/readeckobo               OPTIONAL NickelMenu entry (copy manually!)
+
+Install (over ftp/telnet, or by un-tarring over the root filesystem)
+--------------------------------------------------------------------
+1. Copy usr/ and etc/ to the device root (e.g. `tar -xzf ... -C /` as root).
+2. Copy mnt/onboard/.adds/readeckobo/config.sample to
+   /mnt/onboard/.adds/readeckobo/config and set SERVER_URL + TOKEN.
+3. Optional: copy mnt/onboard/.adds/nm/readeckobo into /mnt/onboard/.adds/nm/
+   for a NickelMenu "Sync Readeck" entry (requires NickelMenu).
+4. Trigger the rescan manually once: `readeckobo-agent --once` (see AGENT.md),
+   or reboot so the udev rule is loaded.
+
+WARNING: this never touches an existing /mnt/onboard/.adds/nm config; the
+NickelMenu entry is opt-in and copied by you.

@@ -32,6 +32,11 @@ steps:
     commands:
       - ./scripts/check-coverage.sh 60
 
+  agent:
+    image: golang:1.24.5-alpine
+    commands:
+      - make agent
+
   extract-semver-tags:
     image: alpine/git:latest
     commands:
