@@ -12,8 +12,8 @@ type BookmarkSync struct {
 
 type ResourceImage struct {
 	Src    string `json:"src"`
-	Width  int      `json:"width"`
-	Height int      `json:"height"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
 }
 
 type ResourceLink struct {
@@ -30,29 +30,76 @@ type Resources struct {
 }
 
 type Bookmark struct {
-	Authors      []string    `json:"authors"`
-	Created      time.Time   `json:"created"`
-	Description  string      `json:"description"`
-	DocumentType string      `json:"document_type"`
-	HasArticle   bool        `json:"has_article"`
-		Href      string   `json:"href"`
-	ID           string      `json:"id"`
-	IsArchived   bool        `json:"is_archived"`
-	IsDeleted    bool        `json:"is_deleted"`
-	IsMarked     bool        `json:"is_marked"`
-	Labels       []string    `json:"labels"`
-	Lang         string      `json:"lang"`
-	Loaded       bool        `json:"loaded"`
-	ReadProgress int         `json:"read_progress"`
-	Resources    Resources   `json:"resources"`
-	Site         string      `json:"site"`
-	SiteName     string      `json:"site_name"`
-	State        int         `json:"state"`
-	TextDirection string      `json:"text_direction"`
-	Title        string      `json:"title"`
-	Type         string      `json:"type"`
-	Updated      time.Time   `json:"updated"`
-	URL          string      `json:"url"`
-	WordCount    int         `json:"word_count"`
-	Published    time.Time   `json:"published"`
+	Authors       []string  `json:"authors"`
+	Created       time.Time `json:"created"`
+	Description   string    `json:"description"`
+	DocumentType  string    `json:"document_type"`
+	HasArticle    bool      `json:"has_article"`
+	Href          string    `json:"href"`
+	ID            string    `json:"id"`
+	IsArchived    bool      `json:"is_archived"`
+	IsDeleted     bool      `json:"is_deleted"`
+	IsMarked      bool      `json:"is_marked"`
+	Labels        []string  `json:"labels"`
+	Lang          string    `json:"lang"`
+	Loaded        bool      `json:"loaded"`
+	ReadProgress  int       `json:"read_progress"`
+	Resources     Resources `json:"resources"`
+	Site          string    `json:"site"`
+	SiteName      string    `json:"site_name"`
+	State         int       `json:"state"`
+	TextDirection string    `json:"text_direction"`
+	Title         string    `json:"title"`
+	Type          string    `json:"type"`
+	Updated       time.Time `json:"updated"`
+	URL           string    `json:"url"`
+	WordCount     int       `json:"word_count"`
+	Published     time.Time `json:"published"`
+}
+
+// Annotation is a Readeck highlight/annotation attached to a bookmark.
+// Field set matches the live 0.23.2 wire format (see
+// docs/research/readeck-annotations-api.md): selectors are body-relative
+// XPath, offsets are rune offsets into the selected element's concatenated
+// descendant text (end exclusive), and there is no `updated` field on
+// annotations (only on bookmarks).
+type Annotation struct {
+	ID            string    `json:"id"`
+	StartSelector string    `json:"start_selector"`
+	StartOffset   int       `json:"start_offset"`
+	EndSelector   string    `json:"end_selector"`
+	EndOffset     int       `json:"end_offset"`
+	Color         string    `json:"color"`
+	Created       time.Time `json:"created"`
+	Text          string    `json:"text"`
+	Note          string    `json:"note"`
+}
+
+// AnnotationCreate is the POST /api/bookmarks/{id}/annotations body. Per the
+// live API there is no `text` field (the server recomputes the highlighted
+// text from its own article DOM and any client-supplied `text` is ignored),
+// and `color` is required (≤32 chars).
+type AnnotationCreate struct {
+	StartSelector string `json:"start_selector"`
+	StartOffset   int    `json:"start_offset"`
+	EndSelector   string `json:"end_selector"`
+	EndOffset     int    `json:"end_offset"`
+	Color         string `json:"color"`
+	Note          string `json:"note,omitempty"`
+}
+
+// AnnotationUpdate is the PATCH /api/bookmarks/{id}/annotations/{annotation_id}
+// body. Only `color` (required) and `note` (optional) are bound; selectors,
+// offsets and text are immutable and silently ignored.
+type AnnotationUpdate struct {
+	Color string `json:"color"`
+	Note  string `json:"note,omitempty"`
+}
+
+// annotationUpdateResponse is the PATCH response shape: the full DOM-ordered
+// annotation list plus an updated timestamp. The client only needs to know the
+// call succeeded, so the payload is decoded for completeness but not exposed.
+type annotationUpdateResponse struct {
+	Annotations []Annotation `json:"annotations"`
+	Updated     time.Time    `json:"updated"`
 }

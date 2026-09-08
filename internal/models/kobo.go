@@ -15,9 +15,9 @@ type KoboGetRequest struct {
 
 // KoboGetResponse represents the outgoing response for /api/kobo/get
 type KoboGetResponse struct {
-	Status int                         `json:"status"`
+	Status int                        `json:"status"`
 	List   map[string]KoboArticleItem `json:"list"`
-	Total  int                         `json:"total"`
+	Total  int                        `json:"total"`
 }
 
 // KoboDownloadRequest represents the incoming request for /api/kobo/download

@@ -24,10 +24,10 @@ const (
 
 // Client represents a Readeck API client.
 type Client struct {
-	BaseURL    *url.URL
+	BaseURL     *url.URL
 	AccessToken string
-	HTTPClient *http.Client
-	Logger     *logger.Logger // New field
+	HTTPClient  *http.Client
+	Logger      *logger.Logger // New field
 }
 
 // NewClient creates a new Readeck API client.
@@ -54,10 +54,10 @@ func NewClient(baseURL string, accessToken string, logger *logger.Logger, httpCl
 	}
 
 	return &Client{
-		BaseURL:    parsedURL,
+		BaseURL:     parsedURL,
 		AccessToken: accessToken,
-		HTTPClient: httpClient,
-		Logger: logger,
+		HTTPClient:  httpClient,
+		Logger:      logger,
 	}, nil
 }
 
@@ -81,19 +81,19 @@ func (c *Client) doRequest(ctx context.Context, method, path string, queryParams
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
-	    if body != nil {
-	        req.Header.Set("Content-Type", "application/json")
-	    }
-	
-	    resp, err := c.HTTPClient.Do(req)
-	    if err != nil {
-	        return "", fmt.Errorf("failed to execute request: %w", err)
-	    }
-	    defer func() { _ = resp.Body.Close() }()
-	
-	    if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-	        return "", &APIError{StatusCode: resp.StatusCode, Message: resp.Status}
-	    }
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", &APIError{StatusCode: resp.StatusCode, Message: resp.Status}
+	}
 	if v != nil {
 		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
 			return "", fmt.Errorf("failed to decode response body: %w", err)
@@ -321,7 +321,7 @@ func (c *Client) SyncBookmarksContent(ctx context.Context, ids []string) (map[st
 	}
 
 	requestBody := map[string]any{
-		"id":             ids,
+		"id":              ids,
 		"resource_prefix": "%/img",
 		"sort":            []string{"created"},
 		"with_html":       false,
@@ -381,10 +381,51 @@ func (c *Client) GetBookmarkArticle(ctx context.Context, id string) (string, err
 	return string(bodyBytes), nil
 }
 
+// GetBookmarkAnnotations fetches the annotation list for a bookmark
+// (GET /api/bookmarks/{id}/annotations). The server sorts the list by
+// document position of each range, not by creation time.
+func (c *Client) GetBookmarkAnnotations(ctx context.Context, id string) ([]Annotation, error) {
+	path := fmt.Sprintf("/api/bookmarks/%s/annotations", id)
+	var annotations []Annotation
+	_, err := c.doRequest(ctx, http.MethodGet, path, nil, nil, &annotations)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch annotations for bookmark %s: %w", id, err)
+	}
+	return annotations, nil
+}
+
+// CreateAnnotation posts a new annotation for a bookmark and returns the
+// server-created annotation (POST /api/bookmarks/{id}/annotations). A 400
+// with "overlapping annotation" is returned by the server when the range
+// overlaps an existing highlight; that surfaces as an *APIError.
+func (c *Client) CreateAnnotation(ctx context.Context, id string, body AnnotationCreate) (*Annotation, error) {
+	path := fmt.Sprintf("/api/bookmarks/%s/annotations", id)
+	var created Annotation
+	_, err := c.doRequest(ctx, http.MethodPost, path, nil, body, &created)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create annotation for bookmark %s: %w", id, err)
+	}
+	return &created, nil
+}
+
+// UpdateAnnotation patches an existing annotation's color and/or note
+// (PATCH /api/bookmarks/{id}/annotations/{annotation_id}). Selectors and
+// offsets are immutable server-side; only color (required) and note (optional)
+// are bound from body.
+func (c *Client) UpdateAnnotation(ctx context.Context, id, annotationID string, body AnnotationUpdate) error {
+	path := fmt.Sprintf("/api/bookmarks/%s/annotations/%s", id, annotationID)
+	var resp annotationUpdateResponse
+	_, err := c.doRequest(ctx, http.MethodPatch, path, nil, body, &resp)
+	if err != nil {
+		return fmt.Errorf("failed to update annotation %s for bookmark %s: %w", annotationID, id, err)
+	}
+	return nil
+}
+
 // UpdateBookmark updates a bookmark.
 func (c *Client) UpdateBookmark(ctx context.Context, id string, updates map[string]any) error {
 	path := fmt.Sprintf("/api/bookmarks/%s", id)
-		_, err := c.doRequest(ctx, http.MethodPatch, path, nil, updates, nil)
+	_, err := c.doRequest(ctx, http.MethodPatch, path, nil, updates, nil)
 	if err != nil {
 		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == http.StatusNotFound {
 			c.Logger.Infof("Bookmark with ID '%s' not found on Readeck server. Treating as a successful action for the Kobo client.", id)

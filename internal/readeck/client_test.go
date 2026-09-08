@@ -3,6 +3,7 @@ package readeck
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -43,7 +44,7 @@ func TestGetBookmarksSync(t *testing.T) {
 			t.Errorf("Expected Authorization header 'Bearer test-token', got '%s'", r.Header.Get("Authorization"))
 		}
 
-				mockResponse := []BookmarkSync{
+		mockResponse := []BookmarkSync{
 			{ID: "1", Time: time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), Type: "update"},
 		}
 		if err := json.NewEncoder(w).Encode(mockResponse); err != nil {
@@ -207,7 +208,7 @@ func TestUpdateBookmark(t *testing.T) {
 		}
 
 		var updates map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 			t.Fatalf("Failed to decode request body: %v", err)
 		}
 		if updates["is_archived"] != true {
@@ -253,18 +254,18 @@ func TestCreateBookmark(t *testing.T) {
 		}
 
 		var body map[string]string
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("Failed to decode request body: %v", err)
 		}
 		if body["url"] != "http://example.com/new" {
 			t.Errorf("Expected URL 'http://example.com/new', got '%s'", body["url"])
 		}
-		        w.WriteHeader(http.StatusCreated)
-			}))
-			defer server.Close()
-		
-			client, _ := NewClient(server.URL, "test-token", testLogger, nil)
-			ctx := context.Background()
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
 
 	err := client.CreateBookmark(ctx, "http://example.com/new")
 	if err != nil {
@@ -306,5 +307,151 @@ func TestGetBookmarksWithIsArchived(t *testing.T) {
 	}
 	if len(bookmarks) != 1 || bookmarks[0].ID != "b1" {
 		t.Errorf("Expected 1 bookmark with ID 'b1', got %+v", bookmarks)
+	}
+}
+
+func TestGetBookmarkAnnotations(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Errorf("Expected GET, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/bookmarks/b1/annotations" {
+			t.Errorf("Expected '/api/bookmarks/b1/annotations', got '%s'", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			t.Errorf("Expected Authorization 'Bearer test-token', got '%s'", r.Header.Get("Authorization"))
+		}
+		annotations := []Annotation{
+			{
+				ID:            "a1",
+				StartSelector: "section[1]/article[1]/p[1]",
+				StartOffset:   0,
+				EndSelector:   "section[1]/article[1]/p[1]",
+				EndOffset:     55,
+				Color:         "yellow",
+				Text:          "ALPHA one two three four five six seven eight nine ten.",
+				Note:          "",
+			},
+		}
+		if err := json.NewEncoder(w).Encode(annotations); err != nil {
+			t.Fatalf("Failed to encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
+
+	annotations, err := client.GetBookmarkAnnotations(ctx, "b1")
+	if err != nil {
+		t.Fatalf("GetBookmarkAnnotations failed: %v", err)
+	}
+	if len(annotations) != 1 || annotations[0].ID != "a1" || annotations[0].StartOffset != 0 {
+		t.Errorf("unexpected annotations: %+v", annotations)
+	}
+}
+
+func TestCreateAnnotation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("Expected POST, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/bookmarks/b1/annotations" {
+			t.Errorf("Expected '/api/bookmarks/b1/annotations', got '%s'", r.URL.Path)
+		}
+		var body AnnotationCreate
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Failed to decode request body: %v", err)
+		}
+		if body.StartSelector != "section[1]/article[1]/p[1]" || body.StartOffset != 3 ||
+			body.EndSelector != "section[1]/article[1]/p[1]" || body.EndOffset != 10 ||
+			body.Color != "yellow" || body.Note != "a note" {
+			t.Errorf("unexpected create body: %+v", body)
+		}
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(Annotation{
+			ID:            "new-a1",
+			StartSelector: body.StartSelector,
+			StartOffset:   body.StartOffset,
+			EndSelector:   body.EndSelector,
+			EndOffset:     body.EndOffset,
+			Color:         body.Color,
+			Note:          body.Note,
+		})
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
+
+	created, err := client.CreateAnnotation(ctx, "b1", AnnotationCreate{
+		StartSelector: "section[1]/article[1]/p[1]",
+		StartOffset:   3,
+		EndSelector:   "section[1]/article[1]/p[1]",
+		EndOffset:     10,
+		Color:         "yellow",
+		Note:          "a note",
+	})
+	if err != nil {
+		t.Fatalf("CreateAnnotation failed: %v", err)
+	}
+	if created == nil || created.ID != "new-a1" {
+		t.Errorf("unexpected created annotation: %+v", created)
+	}
+}
+
+func TestCreateAnnotationOverlap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": 400, "message": "overlapping annotation"})
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
+
+	_, err := client.CreateAnnotation(ctx, "b1", AnnotationCreate{
+		StartSelector: "section[1]/article[1]/p[1]",
+		StartOffset:   0,
+		EndSelector:   "section[1]/article[1]/p[1]",
+		EndOffset:     10,
+		Color:         "yellow",
+	})
+	if err == nil {
+		t.Fatal("expected an error for overlapping annotation")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected *APIError with status 400, got %T %v", err, err)
+	}
+}
+
+func TestUpdateAnnotation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Errorf("Expected PATCH, got %s", r.Method)
+		}
+		if r.URL.Path != "/api/bookmarks/b1/annotations/a1" {
+			t.Errorf("Expected '/api/bookmarks/b1/annotations/a1', got '%s'", r.URL.Path)
+		}
+		var body AnnotationUpdate
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("Failed to decode request body: %v", err)
+		}
+		if body.Color != "yellow" || body.Note != "patched" {
+			t.Errorf("unexpected update body: %+v", body)
+		}
+		_ = json.NewEncoder(w).Encode(annotationUpdateResponse{
+			Annotations: []Annotation{{ID: "a1", Color: "yellow", Note: "patched"}},
+			Updated:     time.Now(),
+		})
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
+
+	if err := client.UpdateAnnotation(ctx, "b1", "a1", AnnotationUpdate{Color: "yellow", Note: "patched"}); err != nil {
+		t.Fatalf("UpdateAnnotation failed: %v", err)
 	}
 }
