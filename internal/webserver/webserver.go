@@ -20,6 +20,13 @@ func ListenAndServe(port int, application *app.App, logger *logger.Logger) {
 	mux.HandleFunc("/api/kobo/download", application.HandleKoboDownload)
 	mux.HandleFunc("/api/kobo/send", application.HandleKoboSend)
 	mux.HandleFunc("/api/convert-image", application.HandleConvertImage)
+
+	// On-device agent routes (stream E wire contract): kepub serving, the
+	// agent state feed and annotation ingress. Go 1.22+ path wildcards.
+	mux.HandleFunc("/api/kepub/{id}", application.HandleKepubDownload)
+	mux.HandleFunc("/api/agent/state", application.HandleAgentState)
+	mux.HandleFunc("/api/agent/annotations", application.HandleAgentAnnotations)
+
 	mux.HandleFunc("/instapaper-proxy/storeapi/v1/initialization", application.HandleDumpAndForward)
 	mux.HandleFunc("/instapaper-proxy/storeapi/", application.HandleDumpAndForward)
 	mux.HandleFunc("/instapaper-proxy/instapaper/api/kobo/get", application.HandleKoboGet)

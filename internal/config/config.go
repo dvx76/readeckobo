@@ -21,12 +21,13 @@ type ConfigReadeck struct {
 }
 
 type Config struct {
-	Readeck  ConfigReadeck `koanf:"readeck"`
-	Server   struct {
-		Port int `koanf:"port" validate:"min=1,max=65535"`
+	Readeck ConfigReadeck `koanf:"readeck"`
+	Server  struct {
+		Port    int    `koanf:"port" validate:"min=1,max=65535"`
+		DataDir string `koanf:"data_dir"`
 	} `koanf:"server"`
-	Users    []User        `koanf:"users" validate:"required,min=1,dive"`
-	LogLevel string        `koanf:"log_level" validate:"oneof=error warn info debug"`
+	Users    []User `koanf:"users" validate:"required,min=1,dive"`
+	LogLevel string `koanf:"log_level" validate:"oneof=error warn info debug"`
 }
 
 func (c *Config) Validate() error {
@@ -70,7 +71,8 @@ func Load(path string) (*Config, error) {
 
 func setDefaultValues(k *koanf.Koanf) error {
 	return k.Load(confmap.Provider(map[string]any{
-		"server.port": 8080,
-		"log_level":   "info",
+		"server.port":     8080,
+		"server.data_dir": "data",
+		"log_level":       "info",
 	}, "."), nil)
 }

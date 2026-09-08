@@ -26,6 +26,7 @@ import (
 	"readeckobo/internal/logger"
 	"readeckobo/internal/models"
 	"readeckobo/internal/readeck"
+	"readeckobo/internal/store"
 )
 
 type App struct {
@@ -33,11 +34,18 @@ type App struct {
 	Logger            *logger.Logger
 	ImageHTTPClient   *http.Client
 	ReadeckHTTPClient *http.Client
+	Store             *store.Store
 }
 
 func WithImageHTTPClient(client *http.Client) Option {
 	return func(a *App) {
 		a.ImageHTTPClient = client
+	}
+}
+
+func WithStore(st *store.Store) Option {
+	return func(a *App) {
+		a.Store = st
 	}
 }
 
@@ -357,9 +365,9 @@ func (a *App) HandleKoboDownload(w http.ResponseWriter, r *http.Request) {
 
 	var req models.KoboDownloadRequest
 	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&req); err != nil {
-                sanitized := strings.ReplaceAll(string(bodyBytes), ";", "&")
-                r.Body = io.NopCloser(strings.NewReader(sanitized))
-                r.ContentLength = int64(len(sanitized))
+		sanitized := strings.ReplaceAll(string(bodyBytes), ";", "&")
+		r.Body = io.NopCloser(strings.NewReader(sanitized))
+		r.ContentLength = int64(len(sanitized))
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "Invalid request body or form data", http.StatusBadRequest)
 			a.Logger.Errorf("Error decoding /api/kobo/download request: %v, URL: %s, Params: %v", err, r.URL.Path, r.URL.Query())

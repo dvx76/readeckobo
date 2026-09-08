@@ -6,6 +6,7 @@ import (
 	"readeckobo/internal/app"
 	"readeckobo/internal/config"
 	"readeckobo/internal/logger"
+	"readeckobo/internal/store"
 	"readeckobo/internal/webserver"
 )
 
@@ -21,10 +22,18 @@ func main() {
 	}
 	appLogger := logger.New(logLevel)
 
+	// State store (SQLite, WAL) under server.data_dir.
+	st, err := store.Open(cfg.Server.DataDir)
+	if err != nil {
+		log.Fatalf("Error opening state store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
 	// Initialize application
 	application := app.NewApp(
 		app.WithConfig(cfg),
 		app.WithLogger(appLogger),
+		app.WithStore(st),
 	)
 
 	// Initialize and start the web server

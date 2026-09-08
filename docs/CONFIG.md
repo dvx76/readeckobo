@@ -7,6 +7,7 @@ This document provides a detailed reference for all available configuration opti
 | Key | Description | Type | Default | Required |
 | :--- | :--- | :--- | :--- | :--- |
 | `server.port` | The TCP port the server listens on. | Integer | `8080` | No |
+| `server.data_dir` | Directory for the server's SQLite state store (`readeckobo.sqlite`). Holds the kepub cache (generated `.kepub.epub` artifacts + span maps) and the annotation ledger that dedupes on-device highlights. Created on startup if missing. | String | `data` | No |
 | `log_level` | Output verbosity. Options: `debug`, `info`, `warn`, `error`. | String | `info` | No |
 | `readeck.host` | The full base URL of your Readeck instance. | URL String | - | **Yes** |
 | `users` | A list of Kobo-to-Readeck user mappings. | List of Objects | - | **Yes** |
@@ -32,6 +33,7 @@ Each entry in the `users` list maps a Kobo device identity to a Readeck account.
 ```yaml
 server:
   port: 8080
+  data_dir: data # optional; state store (kepub cache, annotation ledger)
 log_level: debug
 
 readeck:

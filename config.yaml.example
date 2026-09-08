@@ -1,5 +1,8 @@
 server:
   port: 8080
+  # Optional: directory for the server state store (kepub cache, annotation
+  # ledger). Defaults to "data" when omitted.
+  # data_dir: data
 log_level: info
 readeck:
   host: "https://your-readeck-instance.com"

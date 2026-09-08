@@ -8,6 +8,56 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+func TestDataDir(t *testing.T) {
+	base := map[string]any{
+		"readeck": map[string]any{"host": "https://readeck.example.com"},
+		"users": []map[string]any{
+			{
+				"token":                "test-token",
+				"readeck_access_token": "test-readeck-token",
+			},
+		},
+	}
+	write := func(t *testing.T, cfg map[string]any) string {
+		t.Helper()
+		dir := t.TempDir()
+		path := dir + "/config.yaml"
+		data, err := yaml.Marshal(cfg)
+		if err != nil {
+			t.Fatalf("marshal: %v", err)
+		}
+		if err := os.WriteFile(path, data, 0o644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		return path
+	}
+
+	t.Run("default data_dir is data", func(t *testing.T) {
+		cfg, err := Load(write(t, base))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Server.DataDir != "data" {
+			t.Errorf("default data_dir = %q, want %q", cfg.Server.DataDir, "data")
+		}
+	})
+
+	t.Run("explicit data_dir", func(t *testing.T) {
+		cfgMap := map[string]any{
+			"readeck": base["readeck"],
+			"users":   base["users"],
+			"server":  map[string]any{"data_dir": "/var/lib/readeckobo"},
+		}
+		cfg, err := Load(write(t, cfgMap))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if cfg.Server.DataDir != "/var/lib/readeckobo" {
+			t.Errorf("data_dir = %q, want /var/lib/readeckobo", cfg.Server.DataDir)
+		}
+	})
+}
+
 func TestLoad(t *testing.T) {
 	tests := []struct {
 		name        string
