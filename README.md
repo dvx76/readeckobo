@@ -131,10 +131,23 @@ Readeck** — all over Wi-Fi.
 * Device side: install the agent once from a `KoboRoot.tgz`, add a two-line
   config, and it runs in the background.
 
+Device setup in short:
+
+1. `make agent` → copy `dist/agent/KoboRoot.tgz` to the Kobo as
+   `.kobo/KoboRoot.tgz`, then eject — it installs on reboot.
+2. Create `/mnt/onboard/.adds/readeckobo/config` on the device:
+   `SERVER_URL=<your server>` and `TOKEN=<users[].token from config.yaml>`
+   (optional `CA_FILE` for private-CA servers, since the device has no system
+   CA store).
+3. Install [NickelDBus](https://github.com/shermp/NickelDBus) (provides
+   `qndb`) so the agent can trigger library rescans over Wi-Fi, then run
+   NickelMenu → "Sync Readeck" once.
+
 For what it does, prerequisites, install, limitations, troubleshooting and the
 real-device validation checklist, see **[docs/HIGHLIGHTS.md](docs/HIGHLIGHTS.md)**.
 The full agent reference (build, config keys, wire contract, open questions)
-is in **[docs/AGENT.md](docs/AGENT.md)**.
+is in **[docs/AGENT.md](docs/AGENT.md)**, and the read-only on-device
+diagnostics runbook in **[docs/device-diagnostics.md](docs/device-diagnostics.md)**.
 
 ## 🔒 A Quick Word on Security
 
@@ -195,4 +208,7 @@ The `Makefile` has some handy targets:
 * `make fmt`: Check gofmt on tracked Go files (excludes `vendor/`).
 * `make agent` (alias `make dist`): Cross-compile the on-device agent and
   build the `dist/agent/KoboRoot.tgz` installer.
+* `make refresh-cabundle`: Re-download the Mozilla CA bundle embedded in the
+  agent (commit the updated file afterwards).
+* `make test-all`: Run the full test suite with `-count=1`.
 * `make ci`: Run all CI checks (linting and testing).
