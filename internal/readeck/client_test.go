@@ -148,6 +148,64 @@ func TestGetBookmarksPagination(t *testing.T) {
 	}
 }
 
+// TestGetBookmarksPaginationMultiLineLink is a regression test for Readeck
+// sending the Link header as separate header lines (previous, next, first,
+// last) once offset > 0: resp.Header.Get("Link") only returns the first
+// line (rel="previous"), which used to abort pagination after page 2.
+func TestGetBookmarksPaginationMultiLineLink(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		offset := r.URL.Query().Get("offset")
+		base := "https://" + r.Host + "/api/bookmarks?limit=50&offset=%d"
+		switch requestCount {
+		case 1:
+			if offset != "0" {
+				t.Errorf("Expected first request offset '0', got '%s'", offset)
+			}
+			w.Header().Add("Link", fmt.Sprintf("<%s>; rel=\"next\"", fmt.Sprintf(base, 50)))
+			w.Header().Add("Link", fmt.Sprintf("<%s>; rel=\"first\"", fmt.Sprintf(base, 0)))
+			w.Header().Add("Link", fmt.Sprintf("<%s>; rel=\"last\"", fmt.Sprintf(base, 100)))
+		case 2:
+			if offset != "50" {
+				t.Errorf("Expected second request offset '50', got '%s'", offset)
+			}
+			// Readeck's real shape for offset >= 1 page: previous first,
+			// next second, as separate header lines.
+			w.Header().Add("Link", fmt.Sprintf("<%s>; rel=\"previous\"", fmt.Sprintf(base, 0)))
+			w.Header().Add("Link", fmt.Sprintf("<%s>; rel=\"next\"", fmt.Sprintf(base, 100)))
+			w.Header().Add("Link", fmt.Sprintf("<%s>; rel=\"first\"", fmt.Sprintf(base, 0)))
+			w.Header().Add("Link", fmt.Sprintf("<%s>; rel=\"last\"", fmt.Sprintf(base, 100)))
+		case 3:
+			if offset != "100" {
+				t.Errorf("Expected third request offset '100', got '%s'", offset)
+			}
+			// Last page: no rel="next" line at all.
+		default:
+			t.Errorf("Unexpected extra request #%d", requestCount)
+		}
+		if err := json.NewEncoder(w).Encode([]Bookmark{{ID: "b" + offset}}); err != nil {
+			t.Fatalf("Failed to encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
+
+	bookmarks, err := client.GetBookmarks(ctx, "", nil)
+	if err != nil {
+		t.Fatalf("GetBookmarks failed: %v", err)
+	}
+	if len(bookmarks) != 3 ||
+		bookmarks[0].ID != "b0" || bookmarks[1].ID != "b50" || bookmarks[2].ID != "b100" {
+		t.Errorf("Expected all three pages aggregated, got %+v", bookmarks)
+	}
+	if requestCount != 3 {
+		t.Errorf("Expected exactly 3 requests, got %d", requestCount)
+	}
+}
+
 func TestGetBookmarkDetails(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/bookmarks/b1" {

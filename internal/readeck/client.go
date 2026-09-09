@@ -100,7 +100,7 @@ func (c *Client) doRequest(ctx context.Context, method, path string, queryParams
 		}
 	}
 
-	totalPages := resp.Header.Get("Link")
+	totalPages := strings.Join(resp.Header.Values("Link"), ",")
 	return totalPages, nil
 }
 
