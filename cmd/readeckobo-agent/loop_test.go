@@ -207,6 +207,64 @@ func mustLoadIndex(t *testing.T, env *loopEnv) *indexStore {
 	return idx
 }
 
+// TestSyncLoopMissedRemoveSweep covers the once-only remove emission: the
+// server sends each remove exactly once and then drops its ledger row, so a
+// device that missed that emission (offline, or the remove was consumed by a
+// different client sharing the device id) never sees it again. The feed
+// still carries every live bookmark, so a managed file whose bookmark is
+// absent from the feed must be swept as if removed (this is what finally
+// deletes video kepubs synced before the server excluded videos).
+func TestSyncLoopMissedRemoveSweep(t *testing.T) {
+	env := newLoopEnv(t)
+	env.setKepub(bookAID, "KEPUB-A-V1")
+	env.setKepub(bookBID, "KEPUB-B-V1")
+
+	// Pass 1: both articles live → both files on disk and managed.
+	env.setState(
+		fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z"), env.server.URL),
+		fullArticle(articleB("etag-b1", "2026-09-05T14:30:00Z"), env.server.URL),
+	)
+	if err := env.runSync(t); err != nil {
+		t.Fatalf("pass 1: %v", err)
+	}
+	pathA := filepath.Join(env.onboard, ".kobo", "readeck", fileA)
+	if _, err := os.Stat(pathA); err != nil {
+		t.Fatalf("pass 1: kepub A not on disk: %v", err)
+	}
+
+	// Pass 2: A vanishes from the feed with NO explicit remove (the missed
+	// emission). The sweep must delete the file and tombstone the index.
+	env.setState(fullArticle(articleB("etag-b1", "2026-09-05T14:30:00Z"), env.server.URL))
+	if err := env.runSync(t); err != nil {
+		t.Fatalf("pass 2: %v", err)
+	}
+	if _, err := os.Stat(pathA); !os.IsNotExist(err) {
+		t.Fatalf("pass 2: kepub A still present without a feed entry")
+	}
+	idx := mustLoadIndex(t, env)
+	if e, ok := idx.get(fileA); !ok || e.State != stateRemoved {
+		t.Fatalf("pass 2: index entry A = %+v (ok=%v), want removed tombstone", e, ok)
+	}
+	// B is untouched: still managed, still on disk.
+	if e, ok := idx.get(fileB); !ok || e.State == stateRemoved {
+		t.Fatalf("pass 2: index entry B = %+v (ok=%v), want it still managed", e, ok)
+	}
+	pathB := filepath.Join(env.onboard, ".kobo", "readeck", fileB)
+	if _, err := os.Stat(pathB); err != nil {
+		t.Fatalf("pass 2: kepub B missing: %v", err)
+	}
+
+	// Pass 3: steady state — the tombstone must not cause another rescan
+	// trigger: nothing changes on disk.
+	if err := env.runSync(t); err != nil {
+		t.Fatalf("pass 3: %v", err)
+	}
+	idx = mustLoadIndex(t, env)
+	if e, ok := idx.get(fileA); !ok || e.State != stateRemoved {
+		t.Fatalf("pass 3: index entry A = %+v (ok=%v), want tombstone to persist", e, ok)
+	}
+}
+
 // TestSyncLoopServerOutcomes covers the ledger semantics for the mixed
 // per-row statuses the server can return: definitive statuses are recorded,
 // an error status leaves the row for the next pass.

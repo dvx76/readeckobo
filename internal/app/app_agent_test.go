@@ -3,6 +3,7 @@ package app
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -270,6 +271,7 @@ func TestHandleAgentState(t *testing.T) {
 	mock.setBookmarks(
 		readeck.Bookmark{ID: "bm-1", Title: "Article One", Authors: []string{"Ada Example"}, Updated: t1, IsArchived: false},
 		readeck.Bookmark{ID: "bm-2", Title: "Article Two", Updated: t2, IsArchived: false},
+		readeck.Bookmark{ID: "bm-video", Title: "Video One", Updated: t2, IsArchived: false, Type: "video"},
 	)
 	app, _ := newAgentApp(t, mock)
 	fingerprint := ""
@@ -282,7 +284,7 @@ func TestHandleAgentState(t *testing.T) {
 		}
 		resp := decodeState(t, rr)
 		if len(resp.Articles) != 2 {
-			t.Fatalf("expected 2 articles, got %d: %+v", len(resp.Articles), resp.Articles)
+			t.Fatalf("expected 2 articles (video excluded), got %d: %+v", len(resp.Articles), resp.Articles)
 		}
 		if resp.NextCursor != nil {
 			t.Errorf("next_cursor must be null for v1, got %v", *resp.NextCursor)
@@ -290,6 +292,9 @@ func TestHandleAgentState(t *testing.T) {
 		byID := map[string]models.AgentStateArticle{}
 		for _, a := range resp.Articles {
 			byID[a.BookmarkID] = a
+		}
+		if _, ok := byID["bm-video"]; ok {
+			t.Error("video bookmark must not appear in the state feed")
 		}
 		for _, id := range []string{"bm-1", "bm-2"} {
 			a := byID[id]
@@ -425,6 +430,57 @@ func TestHandleAgentStateMissingDevice(t *testing.T) {
 	}
 }
 
+// TestHandleAgentStateVideoRemoved covers the upgrade path: a video that was
+// synced before the server excluded videos sits in the seen ledger, so the
+// state feed must emit "remove" for it (and nothing on later calls).
+func TestHandleAgentStateVideoRemoved(t *testing.T) {
+	t1 := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+
+	mock := newReadeckMock(fixtureArticle(t))
+	mock.setBookmarks(
+		readeck.Bookmark{ID: "bm-1", Title: "Article One", Updated: t1, IsArchived: false},
+		readeck.Bookmark{ID: "bm-video", Title: "Video One", Updated: t1, IsArchived: false, Type: "video"},
+	)
+	app, _ := newAgentApp(t, mock)
+
+	// Simulate a device that synced the video before the server excluded
+	// videos: the seen ledger still carries the video bookmark.
+	ctx := context.Background()
+	if err := app.Store.UpsertSeen(ctx, store.HashToken(mockPlaintextReadeckToken), "dev-1", "bm-video", t1.Format(time.RFC3339Nano), "add"); err != nil {
+		t.Fatalf("seed ledger: %v", err)
+	}
+
+	rr := httptest.NewRecorder()
+	app.HandleAgentState(rr, stateRequest(agentDeviceToken))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, body %s", rr.Code, rr.Body.String())
+	}
+	resp := decodeState(t, rr)
+
+	var removed *models.AgentStateArticle
+	for i := range resp.Articles {
+		if resp.Articles[i].BookmarkID == "bm-video" {
+			removed = &resp.Articles[i]
+		}
+	}
+	if removed == nil || removed.Action != "remove" {
+		t.Fatalf("video bookmark should be removed, got %+v", resp.Articles)
+	}
+	if removed.URL != "" {
+		t.Errorf("removed item should not carry a download url, got %q", removed.URL)
+	}
+
+	// The video never enters the current set on the next call either.
+	rr2 := httptest.NewRecorder()
+	app.HandleAgentState(rr2, stateRequest(agentDeviceToken))
+	resp2 := decodeState(t, rr2)
+	for _, a := range resp2.Articles {
+		if a.BookmarkID == "bm-video" {
+			t.Errorf("video bookmark should be gone from the feed after remove, got %+v", resp2.Articles)
+		}
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Kepub download
 // ---------------------------------------------------------------------------
@@ -484,6 +540,25 @@ func TestHandleKepubDownloadNotFound(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/kepub/nope", nil)
 	req.SetPathValue("id", "nope")
+	req.Header.Set("Authorization", "Bearer "+agentDeviceToken)
+	rr := httptest.NewRecorder()
+	app.HandleKepubDownload(rr, req)
+	if rr.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", rr.Code)
+	}
+}
+
+func TestHandleKepubDownloadVideoRefused(t *testing.T) {
+	mock := newReadeckMock(fixtureArticle(t))
+	mock.setBookmarks(readeck.Bookmark{
+		ID: "bm-video", Title: "Video One",
+		Updated: time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC), IsArchived: false,
+		Type: "video",
+	})
+	app, _ := newAgentApp(t, mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/kepub/bm-video", nil)
+	req.SetPathValue("id", "bm-video")
 	req.Header.Set("Authorization", "Bearer "+agentDeviceToken)
 	rr := httptest.NewRecorder()
 	app.HandleKepubDownload(rr, req)
@@ -767,5 +842,27 @@ func TestHandleAgentAnnotationsUnauthorized(t *testing.T) {
 	app.HandleAgentAnnotations(rr, req)
 	if rr.Code != http.StatusUnauthorized {
 		t.Errorf("status = %d, want 401", rr.Code)
+	}
+}
+
+func TestHandleAgentAnnotationsVideoSkipped(t *testing.T) {
+	mock := newReadeckMock(fixtureArticle(t))
+	mock.setBookmarks(readeck.Bookmark{
+		ID: "bm-1", Title: "Video One", Authors: []string{"Ada Example"},
+		Updated: time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC), IsArchived: false,
+		Type: "video",
+	})
+	app, _ := newAgentApp(t, mock)
+
+	resp := postAnnotations(t, app, annotationItem(nil))
+	if len(resp.Results) != 1 {
+		t.Fatalf("expected 1 result, got %+v", resp.Results)
+	}
+	res := resp.Results[0]
+	if res.Status != "skipped" || res.Error == "" {
+		t.Fatalf("unexpected result for video bookmark: %+v", res)
+	}
+	if mock.createCalls != 0 {
+		t.Errorf("createCalls = %d, want 0 (no annotation on a video)", mock.createCalls)
 	}
 }

@@ -12,7 +12,7 @@ rescan, and (optionally) NickelMenu for a manual sync entry.
 
 ```
 Kobo ──Wi-Fi──► readeckobo server (stream D)
-  │  GET /api/agent/state?device=…        → article list (add/update/remove)
+  │  GET /api/agent/state?device=…        → article list (add/update/remove; videos excluded)
   │  GET /api/kepub/{id}                  → the .kepub.epub
   │  POST /api/agent/annotations          → highlights/notes from the device
   │
@@ -128,13 +128,21 @@ hook, the menu entry and loop mode from running concurrently.
 
 ### One sync pass does (in order)
 
-1. **State** — `GET /api/agent/state?device=<serial>`.
+1. **State** — `GET /api/agent/state?device=<serial>`. The feed carries the
+   user's non-archived bookmarks with `add`/`update`/`remove` actions; Readeck
+   **video** bookmarks (`type="video"`, its built-in "Videos" filter) are
+   excluded — they have no readable text for an e-reader, and a video synced
+   before this exclusion shows up as `remove`.
 2. **Files** — for `add`/`update`: download the kepub to a temp file and
    rename into `.kobo/readeck/<sanitized-title>-<bookmark_id>.kepub.epub`
    (skipped when the local index already has the same etag). For `remove`:
    delete the file and tombstone the index entry. **v1 leaves the DB rows of
    removed books alone** — Nickel drops stale content rows on the next
    rescan, or the user can delete the entry manually from the library.
+   Finally the agent sweeps managed files whose bookmark is **absent from
+   the feed entirely**: the server emits each `remove` only once, so a
+   missed emission (offline device, shared device id) would otherwise leave
+   the file and its shelf entry behind forever.
 3. **Rescan + import poll** — when files changed (or an earlier import is
    still pending) run the NickelDBus rescan (`qndb -t 30000 -s
    pfmDoneProcessing -m pfmRescanBooksFull`), then poll the `content` table

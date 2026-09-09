@@ -16,7 +16,7 @@ All three routes authenticate either with `Authorization: Bearer <device-token>`
 
 | Method & path | Purpose |
 |---|---|
-| `GET /api/agent/state?device=<serial>` | state feed of the user's non-archived bookmarks with add/update/remove actions |
+| `GET /api/agent/state?device=<serial>` | state feed of the user's non-archived bookmarks (video-type bookmarks excluded) with add/update/remove actions |
 | `GET /api/kepub/{id}` | the generated kepub for a bookmark (`application/epub+zip`, attachment `<id>.kepub.epub`) |
 | `POST /api/agent/annotations` | ingest device highlight/note rows |
 
@@ -42,6 +42,11 @@ All three routes authenticate either with `Authorization: Bearer <device-token>`
 ```
 
 - Source: `GetBookmarks(ctx, "", isArchived=false)` — all sites, pagination via `Link rel=next` already handled.
+- **Videos excluded**: Readeck's document `type` is `article`, `photo` or `video` (the same
+  discriminator as its built-in "Videos" filter). Video bookmarks have no readable text for an
+  e-reader, so the state feed filters them out of the current set — a video seen before the
+  exclusion (or in the ledger from an older server) is emitted as `remove` once, and
+  `GET /api/kepub/{id}` answers 404 for them.
 - `url` carries the **device** token as a query param (the agent has no TLS client cert).
 - `etag` = the bookmark's `updated` timestamp (`RFC3339Nano`, falling back to `created`,
   then to a hash of URL+title+site). The kepub route falls back to a hash of the article HTML
@@ -238,8 +243,10 @@ POST /api/agent/annotations → app.HandleAgentAnnotations
    The kepub span map is re-derived from the currently served article on every etag change, so
    recorded selectors always come from the same fragment they are validated against.
 6. **`has_article=false` bookmarks** — the state feed includes every non-archived bookmark per
-   the contract; a bookmark without extracted article content produces an empty-kepub (0 spans).
-   Filtering by `has_article` is a candidate follow-up if the agent chokes on empty chapters.
+   the contract, except `type="video"` bookmarks, which are excluded (no readable text for an
+   e-reader); a bookmark without extracted article content still produces an empty-kepub
+   (0 spans). Filtering by `has_article` (photos included) is a candidate follow-up if the
+   agent chokes on empty chapters.
 7. **Per-bookmark annotation list pagination** — `GetBookmarkAnnotations` does a single GET;
    Readeck's per-bookmark list appears unpaginated in practice (the *global* list is paginated).
    If a bookmark accumulates >50 highlights, verify whether pagination kicks in.

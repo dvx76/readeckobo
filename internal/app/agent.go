@@ -178,6 +178,13 @@ func (a *App) HandleAgentState(w http.ResponseWriter, r *http.Request) {
 
 	current := make(map[string]*readeck.Bookmark, len(bookmarks))
 	for i := range bookmarks {
+		if bookmarks[i].IsVideo() {
+			// Readeck videos (its built-in "Videos" filter) have no readable
+			// text for an e-reader. They never enter the current set, so a
+			// video seen before this exclusion is emitted as "remove".
+			a.Logger.Debugf("agent/state: skipping video bookmark %s (%q)", bookmarks[i].ID, bookmarks[i].Title)
+			continue
+		}
 		current[bookmarks[i].ID] = &bookmarks[i]
 	}
 
@@ -283,6 +290,13 @@ func (a *App) HandleKepubDownload(w http.ResponseWriter, r *http.Request) {
 		}
 		http.Error(w, "Failed to fetch bookmark", http.StatusInternalServerError)
 		a.Logger.Errorf("kepub: fetch bookmark %s: %v", id, err)
+		return
+	}
+	if bm.IsVideo() {
+		// Videos are excluded from the sync (the state feed never lists
+		// them); treat a direct request as not found.
+		a.Logger.Debugf("kepub: refusing video bookmark %s (%q)", bm.ID, bm.Title)
+		http.Error(w, "Bookmark not found", http.StatusNotFound)
 		return
 	}
 
@@ -403,6 +417,15 @@ func (a *App) HandleAgentAnnotations(w http.ResponseWriter, r *http.Request) {
 		if info.err != nil {
 			res.Status = "error"
 			res.Error = info.err.Error()
+			results = append(results, res)
+			continue
+		}
+		if info.bm.IsVideo() {
+			// Videos are excluded from the sync; a stale device kepub may
+			// still carry highlights, but there is no article to map them
+			// onto. Skip instead of failing the batch.
+			res.Status = "skipped"
+			res.Error = "video bookmarks are not synced to the device"
 			results = append(results, res)
 			continue
 		}

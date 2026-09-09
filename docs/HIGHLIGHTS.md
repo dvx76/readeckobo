@@ -9,7 +9,9 @@
 Your non-archived Readeck articles are generated as **kepubs** (the Kobo epub
 flavour) and imported into your Kobo library into a shelf/collection named
 **Readeck**, sorted by **date added** (the server's article timestamps drive
-the device's "Date added" / Recent sort).
+the device's "Date added" / Recent sort). Readeck **videos** (its built-in
+"Videos" filter) are skipped — there is no readable text to put on an
+e-reader.
 
 Once the articles are on the device, **highlights and notes you make while
 reading sync wirelessly back into Readeck** — over Wi-Fi, no USB cable, no

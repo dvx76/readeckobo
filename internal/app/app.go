@@ -110,6 +110,12 @@ func (a *App) handleFullSync(ctx context.Context, readeckClient *readeck.Client,
 		if !found || bookmark == nil || bookmark.IsArchived {
 			continue
 		}
+		if bookmark.IsVideo() {
+			// Readeck videos (its built-in "Videos" filter) have no readable
+			// text for an e-reader; they never belong on the Kobo.
+			a.Logger.Debugf("Full Sync: skipping video bookmark %s (%q)", bookmark.ID, bookmark.Title)
+			continue
+		}
 
 		favoriteStatus := "0"
 		if bookmark.IsMarked {
@@ -164,7 +170,7 @@ func (a *App) handleIncrementalSync(ctx context.Context, readeckClient *readeck.
 	}
 
 	if len(candidateBookmarkIDs) == 0 {
-		return resultList, 0, nil
+		return a.sweepStaleVideos(ctx, readeckClient, resultList), 0, nil
 	}
 
 	bookmarksDetailsMap, err := readeckClient.SyncBookmarksContent(ctx, candidateBookmarkIDs)
@@ -194,6 +200,12 @@ func (a *App) handleIncrementalSync(ctx context.Context, readeckClient *readeck.
 
 		if bookmark.IsArchived {
 			entry.Status = "2"
+		} else if bookmark.IsVideo() {
+			// Readeck videos (its built-in "Videos" filter) have no readable
+			// text for an e-reader. Emit a delete so a video synced before
+			// this exclusion (or still on the device) gets removed.
+			a.Logger.Debugf("Incremental Sync: deleting video bookmark %s (%q)", bookmark.ID, bookmark.Title)
+			entry.Status = "2"
 		} else {
 			entry.Status = "0"
 			totalNonArchivedBookmarks++
@@ -201,7 +213,34 @@ func (a *App) handleIncrementalSync(ctx context.Context, readeckClient *readeck.
 		resultList[bookmark.ID] = entry
 	}
 
+	// Sweep stale videos: the sync endpoint above only returns bookmarks
+	// changed since `since`, so a video synced long ago never appears and
+	// would linger on the device forever. Emit a delete for every video
+	// the device could still hold. Best-effort: a failed sweep must not
+	// fail the sync itself.
+	resultList = a.sweepStaleVideos(ctx, readeckClient, resultList)
+
 	return resultList, totalNonArchivedBookmarks, nil
+}
+
+// sweepStaleVideos emits a Status "2" (delete) entry for every Readeck
+// video bookmark not already present in resultList, so incremental syncs
+// clean up videos the device synced before videos were excluded. Entries
+// already in resultList (fresh deletes from the sync events above) win.
+func (a *App) sweepStaleVideos(ctx context.Context, readeckClient *readeck.Client, resultList map[string]models.KoboArticleItem) map[string]models.KoboArticleItem {
+	videos, err := readeckClient.GetVideos(ctx)
+	if err != nil {
+		a.Logger.Warnf("Incremental Sync: video sweep failed: %v", err)
+		return resultList
+	}
+	for i := range videos {
+		if _, ok := resultList[videos[i].ID]; ok {
+			continue
+		}
+		a.Logger.Debugf("Incremental Sync: sweeping stale video bookmark %s (%q)", videos[i].ID, videos[i].Title)
+		resultList[videos[i].ID] = models.KoboArticleItem{ItemID: videos[i].ID, Status: "2"}
+	}
+	return resultList
 }
 
 func (a *App) HandleKoboGet(w http.ResponseWriter, r *http.Request) {
@@ -426,6 +465,11 @@ func (a *App) HandleKoboDownload(w http.ResponseWriter, r *http.Request) {
 
 		for i := range bookmarks {
 			if bookmarks[i].URL != "" {
+				if bookmarks[i].IsVideo() {
+					// Videos are excluded from the sync; a device still
+					// holding a stale video item must not receive content.
+					continue
+				}
 				match, err := compareURLs(bookmarks[i].URL, reqURLStr)
 				if err != nil {
 					a.Logger.Warnf("Error comparing URLs for bookmark %s in /api/kobo/download: %v, URL: %s, Params: %v", bookmarks[i].ID, err, r.URL.Path, r.URL.Query())

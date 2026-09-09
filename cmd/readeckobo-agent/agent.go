@@ -293,6 +293,30 @@ func (a *Agent) reconcileFiles(ctx context.Context, articles []Article) (bool, e
 			a.log.Warn("state article %s has unknown action %q; ignoring", art.BookmarkID, art.Action)
 		}
 	}
+	// Sweep managed files the feed no longer mentions. The server emits
+	// each remove exactly once and then drops its ledger row, so a device
+	// that missed that emission (offline, or the remove was consumed by a
+	// different client sharing the device id) would otherwise keep the
+	// file — and its shelf entry — forever. The feed carries every live
+	// bookmark on every call, so anything we still manage but the feed no
+	// longer lists is gone server-side (archived, deleted, or excluded
+	// like video bookmarks): treat it as removed.
+	feedIDs := make(map[string]bool, len(articles))
+	for _, art := range articles {
+		feedIDs[art.BookmarkID] = true
+	}
+	for _, e := range a.idx.managed() {
+		if feedIDs[e.BookmarkID] {
+			continue
+		}
+		a.log.Info("sweep: %s (bookmark %s) no longer in state feed; removing", e.Filename, e.BookmarkID)
+		if err := a.removeKepub(e.Filename, e.BookmarkID); err != nil {
+			a.log.Error("sweep remove %s failed: %v", e.Filename, err)
+			report(err)
+			continue
+		}
+		changed = true
+	}
 	if err := a.idx.save(); err != nil {
 		a.log.Warn("index save failed: %v", err)
 	}
