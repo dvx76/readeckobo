@@ -9,6 +9,7 @@ import (
 type ClientInterface interface {
 	GetBookmarksSync(ctx context.Context, since *time.Time) ([]BookmarkSync, error)
 	GetBookmarks(ctx context.Context, site string, isArchived *bool) ([]Bookmark, error)
+	GetVideos(ctx context.Context) ([]Bookmark, error)
 	GetBookmarkDetails(ctx context.Context, id string) (*Bookmark, error)
 	SyncBookmarksContent(ctx context.Context, ids []string) (map[string]*Bookmark, error)
 	GetBookmarkArticle(ctx context.Context, id string) (string, error)

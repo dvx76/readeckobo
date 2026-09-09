@@ -56,3 +56,11 @@ type Bookmark struct {
 	WordCount    int         `json:"word_count"`
 	Published    time.Time   `json:"published"`
 }
+
+// IsVideo reports whether the bookmark is a video. Readeck's document
+// `type` is one of "article", "photo" or "video" — the same discriminator
+// behind its built-in "Videos" filter. Videos have no readable text for an
+// e-reader, so both Kobo syncs exclude them.
+func (b *Bookmark) IsVideo() bool {
+	return b.Type == "video"
+}

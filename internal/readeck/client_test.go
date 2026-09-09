@@ -33,6 +33,43 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
+func TestBookmarkIsVideo(t *testing.T) {
+	testCases := []struct {
+		name     string
+		bm       Bookmark
+		expected bool
+	}{
+		{
+			name:     "video bookmark",
+			bm:       Bookmark{Type: "video"},
+			expected: true,
+		},
+		{
+			name:     "article bookmark",
+			bm:       Bookmark{Type: "article"},
+			expected: false,
+		},
+		{
+			name:     "photo bookmark",
+			bm:       Bookmark{Type: "photo"},
+			expected: false,
+		},
+		{
+			name:     "missing type (older Readeck)",
+			bm:       Bookmark{},
+			expected: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.bm.IsVideo(); got != tc.expected {
+				t.Errorf("IsVideo() = %v, want %v (type %q)", got, tc.expected, tc.bm.Type)
+			}
+		})
+	}
+}
+
 func TestGetBookmarksSync(t *testing.T) {
 	// Mock server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -98,6 +135,46 @@ func TestGetBookmarks(t *testing.T) {
 	}
 	if len(bookmarks) != 1 || bookmarks[0].ID != "b1" {
 		t.Errorf("Expected 1 bookmark with ID 'b1', got %+v", bookmarks)
+	}
+}
+
+func TestGetVideos(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/bookmarks" {
+			t.Errorf("Expected to request '/api/bookmarks', got '%s'", r.URL.Path)
+		}
+		if r.URL.Query().Get("type") != "video" {
+			t.Errorf("Expected type query parameter 'video', got '%s'", r.URL.Query().Get("type"))
+		}
+		if r.URL.Query().Get("limit") != "50" {
+			t.Errorf("Expected limit query parameter '50', got '%s'", r.URL.Query().Get("limit"))
+		}
+
+		mockResponse := []Bookmark{
+			{ID: "v1", Title: "Video One", Type: "video"},
+			{ID: "v2", Title: "Video Two", Type: "video"},
+		}
+		// No Link header => no rel="next" => single page.
+		if err := json.NewEncoder(w).Encode(mockResponse); err != nil {
+			t.Fatalf("Failed to encode response: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
+
+	videos, err := client.GetVideos(ctx)
+	if err != nil {
+		t.Fatalf("GetVideos failed: %v", err)
+	}
+	if len(videos) != 2 || videos[0].ID != "v1" || videos[1].ID != "v2" {
+		t.Errorf("Expected 2 videos, got %+v", videos)
+	}
+	for _, v := range videos {
+		if !v.IsVideo() {
+			t.Errorf("Expected bookmark %s to be a video", v.ID)
+		}
 	}
 }
 

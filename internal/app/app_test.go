@@ -168,6 +168,7 @@ func TestHandleKoboGet(t *testing.T) {
 		reqBody                *models.KoboGetRequest
 		mockBookmarksSync      []readeck.BookmarkSync
 		mockBookmarkDetails    map[string]*readeck.Bookmark
+		mockVideos             []readeck.Bookmark
 		mockBookmarksSyncErr   error
 		mockBookmarkDetailsErr error
 		expectedStatus         int
@@ -251,6 +252,51 @@ func TestHandleKoboGet(t *testing.T) {
 			expectedTotal:    0,
 		},
 		{
+			name:    "full sync excludes video bookmark",
+			reqBody: &models.KoboGetRequest{Count: "10", AccessToken: mockDeviceToken}, // No 'Since'
+			mockBookmarksSync: []readeck.BookmarkSync{
+				{ID: "1", Type: "update"},
+				{ID: "2", Type: "update"},
+			},
+			mockBookmarkDetails: map[string]*readeck.Bookmark{
+				"1": {ID: "1", Title: "Readable Article", IsArchived: false, Type: "article"},
+				"2": {ID: "2", Title: "Video Bookmark", IsArchived: false, Type: "video"},
+			},
+			expectedStatus:   http.StatusOK,
+			expectedListSize: 1, // Only the article; the video is excluded
+			expectedTotal:    1,
+		},
+		{
+			name:    "incremental sync deletes video bookmark",
+			reqBody: &models.KoboGetRequest{Since: sinceValue, AccessToken: mockDeviceToken},
+			mockBookmarksSync: []readeck.BookmarkSync{
+				{ID: "1", Type: "update"},
+			},
+			mockBookmarkDetails: map[string]*readeck.Bookmark{
+				"1": {ID: "1", Title: "Video Bookmark", IsArchived: false, Type: "video"},
+			},
+			expectedStatus:   http.StatusOK,
+			expectedListSize: 1, // The video is emitted as a delete
+			expectedTotal:    0,
+		},
+		{
+			name:    "incremental sync sweeps stale videos missing from sync events",
+			reqBody: &models.KoboGetRequest{Since: sinceValue, AccessToken: mockDeviceToken},
+			mockBookmarksSync: []readeck.BookmarkSync{
+				{ID: "1", Type: "update"},
+			},
+			mockBookmarkDetails: map[string]*readeck.Bookmark{
+				"1": {ID: "1", Title: "Readable Article", IsArchived: false, Type: "article"},
+			},
+			mockVideos: []readeck.Bookmark{
+				{ID: "8", Title: "Stale Video One", IsArchived: false, Type: "video"},
+				{ID: "9", Title: "Stale Video Two", IsArchived: true, Type: "video"},
+			},
+			expectedStatus:   http.StatusOK,
+			expectedListSize: 3, // The article plus a delete for each swept video
+			expectedTotal:    1,
+		},
+		{
 			name:                 "incremental sync with GetBookmarksSync error",
 			reqBody:              &models.KoboGetRequest{Since: sinceValue, AccessToken: mockDeviceToken},
 			mockBookmarksSyncErr: fmt.Errorf("sync error"),
@@ -316,6 +362,12 @@ func TestHandleKoboGet(t *testing.T) {
 						w.WriteHeader(http.StatusOK)
 						_, _ = w.Write(b.Bytes())
 					}
+				case "/api/bookmarks":
+					// Video sweep (GET /api/bookmarks?type=video) in incremental sync.
+					jsonBytes, _ := json.Marshal(tc.mockVideos)
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusOK)
+					_, _ = w.Write(jsonBytes)
 				default:
 					w.WriteHeader(http.StatusOK)
 					_, _ = w.Write([]byte(`{}`))
@@ -375,6 +427,32 @@ func TestHandleKoboGet(t *testing.T) {
 					item := resp.List["1"]
 					if item.Status != "2" {
 						t.Errorf("expected archived item status to be '2' (pr #3 behavior: remove from My Articles), got '%s'", item.Status)
+					}
+				case "full sync excludes video bookmark":
+					if _, ok := resp.List["2"]; ok {
+						t.Error("video bookmark must not appear in the full sync list")
+					}
+					if _, ok := resp.List["1"]; !ok {
+						t.Error("article bookmark missing from the full sync list")
+					}
+				case "incremental sync deletes video bookmark":
+					item := resp.List["1"]
+					if item.Status != "2" {
+						t.Errorf("expected video bookmark status to be '2' (removed from device), got '%s'", item.Status)
+					}
+				case "incremental sync sweeps stale videos missing from sync events":
+					for _, id := range []string{"8", "9"} {
+						item, ok := resp.List[id]
+						if !ok {
+							t.Errorf("expected swept video %q in list", id)
+							continue
+						}
+						if item.Status != "2" {
+							t.Errorf("expected swept video %q status to be '2', got '%s'", id, item.Status)
+						}
+					}
+					if item := resp.List["1"]; item.Status != "0" {
+						t.Errorf("expected article status to stay '0', got '%s'", item.Status)
 					}
 				case "full sync with image item":
 					item := resp.List["1"]
@@ -444,6 +522,18 @@ func TestHandleKoboDownload(t *testing.T) {
 			},
 			contentType:    "application/json",
 			expectedStatus: http.StatusUnauthorized,
+		},
+		{
+			name: "video bookmark is not downloaded",
+			reqBody: models.KoboDownloadRequest{
+				AccessToken: mockDeviceToken,
+				URL:         "http://example.com/video1",
+			},
+			contentType:    "application/json",
+			expectedStatus: http.StatusNotFound,
+			mockBookmarks: []readeck.Bookmark{
+				{ID: "1", Title: "Test Video", URL: "http://example.com/video1", Type: "video"},
+			},
 		},
 	}
 

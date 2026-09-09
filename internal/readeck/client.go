@@ -274,6 +274,39 @@ func (c *Client) GetBookmarks(ctx context.Context, site string, isArchived *bool
 	return all, nil
 }
 
+// GetVideos fetches every video bookmark (any archived state), following
+// Readeck's Link rel="next" pagination (limit/offset). Readeck's `type`
+// query param is the same discriminator behind its built-in "Videos"
+// filter. Incremental Kobo syncs only see recently changed bookmarks, so
+// this sweep lets them emit deletes for stale videos the device still
+// holds.
+func (c *Client) GetVideos(ctx context.Context) ([]Bookmark, error) {
+	var all []Bookmark
+	offset := 0
+
+	for {
+		queryParams := url.Values{}
+		queryParams.Add("type", "video")
+		queryParams.Add("limit", "50")
+		queryParams.Add("offset", strconv.Itoa(offset))
+
+		var bookmarks []Bookmark
+		linkHeader, err := c.doRequest(ctx, http.MethodGet, "/api/bookmarks", queryParams, nil, &bookmarks)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch video bookmarks: %w", err)
+		}
+		all = append(all, bookmarks...)
+
+		nextOffset := nextOffsetFromLink(linkHeader)
+		if nextOffset == nil {
+			break
+		}
+		offset = *nextOffset
+	}
+
+	return all, nil
+}
+
 // nextOffsetFromLink parses a Link header and returns the "offset" query
 // parameter of the rel="next" link, or nil when there is no next page.
 func nextOffsetFromLink(linkHeader string) *int {
