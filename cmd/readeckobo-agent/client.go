@@ -35,6 +35,7 @@ type Article struct {
 	ETag       string `json:"etag"`
 	Action     string `json:"action"` // add|update|remove
 	Updated    string `json:"updated"`
+	Created    string `json:"created"`
 }
 
 type stateResponse struct {

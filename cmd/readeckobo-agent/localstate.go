@@ -31,7 +31,7 @@ type fileState string
 
 const (
 	stateDownloaded fileState = "downloaded" // file on disk, Nickel import not (yet) observed
-	stateImported   fileState = "imported"   // content row observed; DateCreated set once
+	stateImported   fileState = "imported"   // content row observed; date-added columns ensured
 	stateRemoved    fileState = "removed"    // server asked us to remove it (tombstone)
 )
 
@@ -41,6 +41,7 @@ type indexEntry struct {
 	Title      string    `json:"title"`
 	ETag       string    `json:"etag"`
 	Updated    string    `json:"updated"`
+	Created    string    `json:"created"`
 	State      fileState `json:"state"`
 	RemovedAt  string    `json:"removed_at,omitempty"`
 	LastError  string    `json:"last_error,omitempty"`
@@ -112,7 +113,7 @@ func (s *indexStore) managed() []indexEntry {
 }
 
 // pending returns entries whose file was downloaded but whose import has not
-// been observed yet (DateCreated not set).
+// been observed yet (date-added columns not yet ensured).
 func (s *indexStore) pending() []indexEntry {
 	var out []indexEntry
 	for _, e := range s.entries() {

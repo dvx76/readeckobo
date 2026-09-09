@@ -151,15 +151,23 @@ All SQL below runs **against the copy** (read-only, device untouched):
 DB=diag-out/device/KoboReader.sqlite
 sqlite3 -readonly "file:$DB?mode=ro" "SELECT * FROM DbVersion LIMIT 5;"
 sqlite3 -readonly "file:$DB?mode=ro" \
-  "SELECT ContentID, ContentType, MimeType, BookTitle, VolumeIndex, IsDownloaded \
-   FROM content WHERE ContentID LIKE '%/.kobo/readeck/%' ORDER BY DateCreated;"
+  "SELECT ContentID, ContentType, MimeType, BookTitle, VolumeIndex, IsDownloaded, DateCreated, ___SyncTime \
+   FROM content WHERE ContentID LIKE '%/.kobo/readeck/%' ORDER BY ___SyncTime;"
 sqlite3 -readonly "file:$DB?mode=ro" "PRAGMA table_info(Bookmark);"
 sqlite3 -readonly "file:$DB?mode=ro" \
   "SELECT BookmarkID, VolumeID, Type, Hidden, Text, Annotation, StartContainerPath, StartOffset, EndContainerPath, EndOffset, DateCreated, DateModified \
    FROM Bookmark WHERE VolumeID LIKE '%/.kobo/readeck/%';"
 sqlite3 -readonly "file:$DB?mode=ro" "SELECT Type, count(*) FROM Bookmark WHERE VolumeID LIKE '%/.kobo/readeck/%' GROUP BY Type;"
 sqlite3 -readonly "file:$DB?mode=ro" "SELECT * FROM Shelf;"
-sqlite3 -readonly "file:$DB?mode=ro" "SELECT * FROM ShelfContent;"
+sqlite3 -readonly "file:$DB?mode=ro" "SELECT ShelfName, ContentId, DateModified, _IsDeleted FROM ShelfContent;"
+# Date-added order check: Kobo sorts by ___SyncTime (and collections by
+# ___SyncTime / ShelfContent.DateModified) — all three should equal the
+# Readeck bookmark.created timestamp, not updated or the sync time.
+sqlite3 -readonly "file:$DB?mode=ro" \
+  "SELECT c.BookTitle, c.DateCreated, c.___SyncTime, s.DateModified \
+   FROM content c LEFT JOIN ShelfContent s ON s.ContentId = c.ContentID AND s.ShelfName = 'Readeck' \
+   WHERE c.ContentID LIKE '%/.kobo/readeck/%' AND (c.VolumeIndex = -1 OR c.VolumeIndex IS NULL) \
+   ORDER BY c.___SyncTime;"
 ```
 
 Agent log greps (run on the device, or against `diag-out/agent/agent.log.tail200`):

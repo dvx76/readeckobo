@@ -240,7 +240,7 @@ func TestAPIClientState(t *testing.T) {
 		}
 		seen["auth"] = r.Header.Get("Authorization") == "Bearer tok"
 		seen["device"] = r.URL.Query().Get("device") == "s-123"
-		fmt.Fprint(w, `{"articles":[{"bookmark_id":"b1","title":"T","author":"A","url":"http://x/kepub/b1","etag":"e1","action":"add","updated":"2026-09-01T00:00:00Z"}],"next_cursor":null}`)
+		fmt.Fprint(w, `{"articles":[{"bookmark_id":"b1","title":"T","author":"A","url":"http://x/kepub/b1","etag":"e1","action":"add","updated":"2026-09-07T10:00:00Z","created":"2026-09-01T08:00:00Z"}],"next_cursor":null}`)
 	})
 	client := &apiClient{base: srv.URL, token: "tok", httpc: testHTTPClient(srv, 5*time.Second)}
 	articles, err := client.fetchState(context.Background(), "s-123")
@@ -249,6 +249,12 @@ func TestAPIClientState(t *testing.T) {
 	}
 	if len(articles) != 1 || articles[0].BookmarkID != "b1" || articles[0].Action != "add" {
 		t.Fatalf("articles = %+v", articles)
+	}
+	if articles[0].Created != "2026-09-01T08:00:00Z" {
+		t.Errorf("created = %q, want date-added", articles[0].Created)
+	}
+	if articles[0].Updated != "2026-09-07T10:00:00Z" {
+		t.Errorf("updated = %q", articles[0].Updated)
 	}
 	if !seen["auth"] || !seen["device"] {
 		t.Errorf("request flags: %v", seen)

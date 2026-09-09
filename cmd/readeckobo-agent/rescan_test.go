@@ -69,7 +69,7 @@ func TestPollForImports(t *testing.T) {
 		o.pollTime = 100 * time.Millisecond
 	})
 	// fileA has a real content row in the (rewritten) fixture → found.
-	ag.idx.set(indexEntry{Filename: fileA, BookmarkID: bookAID, ETag: "e", Updated: "2026-09-07T10:00:00Z", State: stateDownloaded})
+	ag.idx.set(indexEntry{Filename: fileA, BookmarkID: bookAID, ETag: "e", Updated: "2026-09-07T10:00:00Z", Created: "2026-09-01T08:00:00Z", State: stateDownloaded})
 	if err := ag.pollForImports(context.Background()); err != nil {
 		t.Fatalf("poll should succeed for an existing row: %v", err)
 	}

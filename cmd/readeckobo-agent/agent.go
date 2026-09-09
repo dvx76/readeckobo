@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -24,9 +25,12 @@ import (
 //  3. When files changed (or an earlier import is still pending): run the
 //     NickelDBus rescan (qndb) unless --no-rescan, then poll the content
 //     table until every pending ContentID appears (timeout/interval tunable).
-//  4. Maintenance on the device DB: set content.DateCreated = article.updated
-//     once per freshly observed import, ensure the collection shelf exists
-//     and owns every imported book row. Never inserts content rows.
+//  4. Maintenance on the device DB: ensure content.___SyncTime +
+//     content.DateCreated = article.created (Readeck date added) for every
+//     managed book row, ensure the collection shelf exists and owns every
+//     imported book row with ShelfContent.DateModified = article.created.
+//     Never inserts content rows. The ensure is idempotent (created is
+//     immutable) so devices synced before the date-added fix self-heal.
 //  5. Highlight scan: snapshot KoboReader.sqlite (WAL-safe), extract
 //     highlights/notes whose VolumeID is one of our files, diff against the
 //     ledger, POST new/changed ones, record the outcomes.
@@ -209,6 +213,23 @@ func (a *Agent) syncOnce(ctx context.Context) error {
 	for _, art := range seen {
 		articles = append(articles, art)
 	}
+	// Deterministic oldest-first order (by date-added, then id): bulk imports
+	// create files in Readeck order so even file mtimes ascend, and logs read
+	// chronologically. The DB sort itself uses explicit timestamps, so this is
+	// belt-and-braces, not the sort mechanism.
+	sort.Slice(articles, func(i, j int) bool {
+		ci, cj := articles[i].Created, articles[j].Created
+		if ci == "" {
+			ci = articles[i].Updated
+		}
+		if cj == "" {
+			cj = articles[j].Updated
+		}
+		if ci != cj {
+			return ci < cj
+		}
+		return articles[i].BookmarkID < articles[j].BookmarkID
+	})
 
 	// --- step 2: files ---
 	changed, err := a.reconcileFiles(ctx, articles)
@@ -227,8 +248,8 @@ func (a *Agent) syncOnce(ctx context.Context) error {
 		a.log.Info("--no-rescan: skipping NickelDBus rescan for %d pending import(s)", pendingBefore)
 	}
 
-	// --- step 4: DateCreated + collection maintenance ---
-	if err := a.maintainCollection(ctx); err != nil {
+	// --- step 4: date-added + collection maintenance ---
+	if err := a.maintainCollection(ctx, articles); err != nil {
 		a.log.Warn("collection maintenance failed: %v", err)
 	}
 
@@ -328,13 +349,33 @@ func (a *Agent) reconcileFiles(ctx context.Context, articles []Article) (bool, e
 //
 // Lifecycle note: re-downloading an *already imported* book (server sent an
 // update with a new etag) keeps the entry imported — Nickel re-uses the
-// existing content row on rescan, so DateCreated must not be re-stamped
-// (spec: set once, only when we just created the row).
+// existing content row on rescan, so the date-added columns converge
+// idempotently to article.created every pass (created is immutable, unlike
+// updated, so re-ensuring is harmless).
 func (a *Agent) ensureKepub(ctx context.Context, art Article, filename string) (bool, error) {
+	created := art.Created
+	if created == "" {
+		// Old servers predate the created field: fall back to updated so the
+		// device still gets a usable (if less stable) timestamp.
+		created = art.Updated
+	}
 	prev, hadPrev := a.idx.get(filename)
 	if hadPrev && prev.ETag == art.ETag && prev.State != stateRemoved {
 		path := filepath.Join(a.kepubDir(), filename)
 		if st, err := os.Stat(path); err == nil && st.Size() > 0 {
+			// Up-to-date: backfill the index when the feed carries newer
+			// metadata (created backfill for devices synced before the
+			// date-added fix, title updates, ...). No download, no rescan.
+			if prev.Created != created || prev.Updated != art.Updated || prev.Title != art.Title || prev.BookmarkID != art.BookmarkID {
+				prev.Created = created
+				prev.Updated = art.Updated
+				prev.Title = art.Title
+				if art.BookmarkID != "" {
+					prev.BookmarkID = art.BookmarkID
+				}
+				prev.LastError = ""
+				a.idx.set(prev)
+			}
 			a.log.Info("up-to-date: %s (etag %s)", filename, art.ETag)
 			return false, nil
 		}
@@ -383,6 +424,7 @@ func (a *Agent) ensureKepub(ctx context.Context, art Article, filename string) (
 		Title:      art.Title,
 		ETag:       art.ETag,
 		Updated:    art.Updated,
+		Created:    created,
 		State:      state,
 	})
 	return true, nil
@@ -509,21 +551,42 @@ func runQNDBRescan(ctx context.Context, qndbPath string, args []string, log *Log
 }
 
 // ---------------------------------------------------------------------------
-// step 4 — DateCreated + collection maintenance
+// step 4 — date-added + collection maintenance
 
-// maintainCollection performs the one-time DateCreated stamping and the
-// Shelf/ShelfContent membership maintenance. It only touches book rows whose
-// ContentID is one of our kepubs; DateCreated is stamped only when the import
-// was just observed (index state "downloaded"), so an already-imported row
-// keeps its timestamp. The shelf/membership ensure is idempotent and
-// self-healing (it also repairs a shelf the user deleted or a membership row
-// lost to a crash).
-func (a *Agent) maintainCollection(ctx context.Context) error {
+// desiredCreated resolves the authoritative "date added" for a managed entry:
+// the feed's created when present (covers backfill for indexes written before
+// the created field existed), else the index's stored created, else the legacy
+// updated fallback for old servers.
+func desiredCreated(e indexEntry, feed map[string]Article) string {
+	if art, ok := feed[e.BookmarkID]; ok && art.Created != "" {
+		return art.Created
+	}
+	if e.Created != "" {
+		return e.Created
+	}
+	return e.Updated
+}
+
+// maintainCollection ensures the Kobo sort keys converge to the Readeck date
+// added (bookmark.created) and maintains the Shelf/ShelfContent membership.
+// It only touches book rows whose ContentID is one of our kepubs. Unlike the
+// original one-shot DateCreated stamping, the ensure is idempotent: created
+// is immutable, so every pass converges already-imported rows (self-healing
+// devices synced before the fix, and rows Nickel re-created on etag updates)
+// instead of leaving them at import time. The shelf/membership ensure is
+// idempotent and self-healing (it also repairs a shelf the user deleted or a
+// membership row lost to a crash).
+func (a *Agent) maintainCollection(ctx context.Context, articles []Article) error {
 	managed := a.idx.managed()
 	if len(managed) == 0 {
 		return nil
 	}
-	pending := a.idx.pending()
+
+	feed := make(map[string]Article, len(articles))
+	for _, art := range articles {
+		// Last one wins on duplicates, matching syncOnce dedup.
+		feed[art.BookmarkID] = art
+	}
 
 	ro, err := openReadOnly(a.koboDB)
 	if err != nil {
@@ -535,7 +598,7 @@ func (a *Agent) maintainCollection(ctx context.Context) error {
 		return err
 	}
 	if len(present) == 0 {
-		a.log.Info("no imported book rows yet; DateCreated/collection step skipped")
+		a.log.Info("no imported book rows yet; date-added/collection step skipped")
 		return nil
 	}
 
@@ -550,33 +613,52 @@ func (a *Agent) maintainCollection(ctx context.Context) error {
 		return fmt.Errorf("cannot determine DbVersion; skipping DB writes: %w", err)
 	}
 
-	// 4a. DateCreated = article.updated, once per freshly observed import.
-	changed := 0
-	for _, e := range pending {
+	// 4a. content.___SyncTime + content.DateCreated = article.created for every
+	// managed book row (idempotent ensure, not once-only).
+	stamped := 0
+	for _, e := range managed {
 		row, ok := present[e.Filename]
 		if !ok {
 			continue // not imported yet; leave pending for a later pass
 		}
-		ts, err := parseKoboTime(e.Updated)
+		raw := desiredCreated(e, feed)
+		ts, err := parseKoboTime(raw)
 		if err != nil {
-			e.LastError = fmt.Sprintf("unparseable article.updated %q: %v", e.Updated, err)
+			if e.State == stateDownloaded {
+				e.LastError = fmt.Sprintf("unparseable article.created %q: %v", raw, err)
+				a.idx.set(e)
+				a.log.Warn("keeping %s pending: %s", e.Filename, e.LastError)
+			} else {
+				a.log.Warn("skipping date ensure for %s: unparseable article.created %q: %v", e.Filename, raw, err)
+			}
+			continue
+		}
+		want := formatKoboTime(ts)
+		// Backfill the index so the next pass does not depend on the feed.
+		if e.Created == "" || (feed[e.BookmarkID].Created != "" && e.Created != feed[e.BookmarkID].Created) {
+			e.Created = raw
+			e.LastError = ""
 			a.idx.set(e)
-			a.log.Warn("keeping %s pending: %s", e.Filename, e.LastError)
-			continue
 		}
-		if err := setDateCreated(ctx, rw, row.ContentID, formatKoboTime(ts)); err != nil {
-			a.log.Warn("DateCreated update failed for %s: %v", e.Filename, err)
-			continue
+		if row.DateCreated != want || row.SyncTime != want {
+			if err := setBookAddedDate(ctx, rw, row.ContentID, want); err != nil {
+				a.log.Warn("date-added update failed for %s: %v", e.Filename, err)
+				continue
+			}
+			stamped++
 		}
-		e.State = stateImported
-		a.idx.set(e)
-		changed++
+		if e.State == stateDownloaded {
+			e.State = stateImported
+			e.LastError = ""
+			a.idx.set(e)
+		}
 	}
-	if changed > 0 {
-		a.log.Info("set DateCreated on %d freshly imported book row(s)", changed)
+	if stamped > 0 {
+		a.log.Info("ensured date-added (___SyncTime/DateCreated) on %d book row(s)", stamped)
 	}
 
-	// 4b. Collection membership for every managed kepub that has a book row.
+	// 4b. Collection membership for every managed kepub that has a book row,
+	// with ShelfContent.DateModified = article.created (not the sync time).
 	if err := ensureShelf(ctx, rw, a.cfg.Collection, a.now(), version); err != nil {
 		return fmt.Errorf("ensure shelf %q: %w", a.cfg.Collection, err)
 	}
@@ -585,7 +667,13 @@ func (a *Agent) maintainCollection(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		if err := addContentToShelf(ctx, rw, a.cfg.Collection, row.ContentID, a.now()); err != nil {
+		raw := desiredCreated(e, feed)
+		ts, err := parseKoboTime(raw)
+		if err != nil {
+			a.log.Warn("shelf membership for %s skipped: unparseable article.created %q", e.Filename, raw)
+			continue
+		}
+		if err := addContentToShelf(ctx, rw, a.cfg.Collection, row.ContentID, formatKoboTime(ts)); err != nil {
 			a.log.Warn("shelf membership for %s failed: %v", e.Filename, err)
 		}
 	}

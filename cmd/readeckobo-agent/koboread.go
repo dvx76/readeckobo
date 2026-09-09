@@ -137,6 +137,7 @@ func openReadWrite(path string) (*sql.DB, error) {
 type bookRowInfo struct {
 	ContentID   string // stored form, e.g. file:///mnt/onboard/.kobo/readeck/x.kepub.epub
 	DateCreated string
+	SyncTime    string
 	BookTitle   string
 }
 
@@ -145,7 +146,7 @@ type bookRowInfo struct {
 // cannot match rows the agent did not import. It works regardless of the
 // exact onboard mount path, which tests exploit by overriding --onboard.
 const managedBookRowQuery = `
-SELECT ContentID, COALESCE(DateCreated, ''), COALESCE(BookTitle, '')
+SELECT ContentID, COALESCE(DateCreated, ''), COALESCE(___SyncTime, ''), COALESCE(BookTitle, '')
 FROM content
 WHERE ContentID LIKE '%/.kobo/readeck/%'
   AND (VolumeIndex = -1 OR VolumeIndex IS NULL)
@@ -161,7 +162,7 @@ func readManagedBookRows(ctx context.Context, db *sql.DB) (map[string]bookRowInf
 	out := map[string]bookRowInfo{}
 	for rows.Next() {
 		var br bookRowInfo
-		if err := rows.Scan(&br.ContentID, &br.DateCreated, &br.BookTitle); err != nil {
+		if err := rows.Scan(&br.ContentID, &br.DateCreated, &br.SyncTime, &br.BookTitle); err != nil {
 			return nil, err
 		}
 		out[filenameOfVolumeID(br.ContentID)] = br

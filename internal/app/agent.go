@@ -111,6 +111,21 @@ func bookmarkUpdated(bm *readeck.Bookmark) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
+// bookmarkCreated returns the bookmark's created timestamp as RFC3339Nano
+// (the stable "date added" to Readeck; drives the Kobo ___SyncTime/DateCreated
+// sort). It falls back to Updated when Created is zero, or "" when both are
+// zero.
+func bookmarkCreated(bm *readeck.Bookmark) string {
+	t := bm.Created
+	if t.IsZero() {
+		t = bm.Updated
+	}
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format(time.RFC3339Nano)
+}
+
 func sha256Hex(s string) string {
 	sum := sha256.Sum256([]byte(s))
 	return hex.EncodeToString(sum[:])
@@ -200,6 +215,7 @@ func (a *App) HandleAgentState(w http.ResponseWriter, r *http.Request) {
 	for _, id := range currentIDs {
 		bm := current[id]
 		updated := bookmarkUpdated(bm)
+		created := bookmarkCreated(bm)
 		etag := etagForBookmark(bm)
 
 		action := "add"
@@ -225,6 +241,7 @@ func (a *App) HandleAgentState(w http.ResponseWriter, r *http.Request) {
 			Etag:       etag,
 			Action:     action,
 			Updated:    updated,
+			Created:    created,
 		})
 	}
 

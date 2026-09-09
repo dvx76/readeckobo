@@ -148,13 +148,16 @@ hook, the menu entry and loop mode from running concurrently.
    pfmDoneProcessing -m pfmRescanBooksFull`), then poll the `content` table
    (read-only) until every pending `ContentID` appears (timeout 180 s, 2 s
    interval). `--no-rescan` skips both.
-4. **Collection + DateCreated** — once a freshly imported book row appears,
-   set `content.DateCreated = article.updated` (**once**; the index tracks
-   that) so the device's "Date added"/Recent sort follows the server's
-   timestamp, and ensure the collection shelf exists (`DbVersion ≥ 64` shape
-   with `Id`/`Type`) and owns the imported book rows (calibre
-   `Shelf`/`ShelfContent` pattern). The agent **never inserts content rows** —
-   Nickel creates them; we only update `DateCreated`.
+4. **Collection + date-added** — ensure `content.___SyncTime` +
+   `content.DateCreated = article.created` (Readeck date added) for every
+   managed book row, so the device's "Date added"/Recent sort follows
+   Readeck's order, and ensure the collection shelf exists (`DbVersion ≥ 64`
+   shape with `Id`/`Type`) and owns the imported book rows with
+   `ShelfContent.DateModified = article.created` (calibre
+   `Shelf`/`ShelfContent` pattern). The ensure is idempotent (`created` is
+   immutable, unlike `updated`) so devices synced before the date-added fix
+   self-heal on the next pass. The agent **never inserts content rows** —
+   Nickel creates them; we only update the date columns.
 5. **Highlights** — snapshot `KoboReader.sqlite` (+ `-wal`/`-shm`) to
    `/tmp/readeckobo-agent.sqlite` (WAL-safe read), extract non-hidden
    `highlight`/`note` rows whose `VolumeID` is one of our files, diff against
@@ -176,8 +179,9 @@ hook, the menu entry and loop mode from running concurrently.
 | `agent.log` | rotating log (truncated > 1 MB) |
 | `agent.lock` | single-instance flock |
 
-If you delete `index.json`, the agent re-downloads every article (and, if the
-import is re-observed, re-stamps `DateCreated`). If you delete `ledger.json`,
+If you delete `index.json`, the agent re-downloads every article (and
+re-ensures the date-added columns on the next pass). If you delete
+`ledger.json`,
 every device highlight is re-sent on the next pass — harmless, the server
 dedups by `bookmark_row_id`.
 
@@ -229,7 +233,7 @@ agent`: builds stay hermetic with the committed bundle.
 
 **WAL-safety.** The device DB is WAL mode while Nickel runs. The agent copies
 `KoboReader.sqlite` + `-wal`/`-shm` to a snapshot and opens the copy read-only
-(3 retries on torn copies), and writes (`DateCreated`, shelf) with a
+(3 retries on torn copies), and writes (date-added columns, shelf) with a
 `busy_timeout` — but writing while Nickel has the DB open is the one area
 that still needs device validation (§6.7).
 
@@ -251,16 +255,22 @@ items specific to this agent. A real Libra 2 / 4.38.23697 must answer:
    offsets are relative to the start/end span. The agent passes device values
    through verbatim — the server maps them, but the whole pipeline needs one
    manual end-to-end highlight test.
-4. **`content.DateCreated` really drives "Date added"** for freshly imported
-   sideloads (research says yes via Calibre/Kobo Utilities; confirm on-device
-   by setting an old timestamp and checking the Recent sort). Also confirm a
-   re-import (etag change) keeps the row instead of creating a new one — the
-   agent relies on that to not re-stamp `DateCreated`.
+4. **Date-added sort key is `___SyncTime` (not `DateCreated`)** on modern
+   firmware (Libra 2, 4.38.x): "Date added" sorts by `content.___SyncTime`,
+   "Recent" by `MAX(___SyncTime, DateLastRead)` (davidfor, MobileRead
+   t=347000; Kobo Utilities' "Update metadata → Date added" writes
+   `___SyncTime`, while `DateCreated` is the publishing date). The agent sets
+   `___SyncTime` + `DateCreated` + `ShelfContent.DateModified` to
+   `article.created` every pass (idempotent). Confirm on-device that the
+   Readeck collection sorted by "Date added" now follows Readeck's order, and
+   that a re-import (etag change, Nickel re-uses the row) keeps the
+   converged timestamp.
 5. **`DbVersion` value on 4.38.23697** and the resulting `Shelf`
    columns (≥ 64 → `Id`/`Type`). The agent reads `DbVersion` and picks the
    shape; verify the shelf appears in the UI (and whether `Activity` rows are
    also required).
-6. **Writing the DB while Nickel runs**: `DateCreated` + `Shelf`/`ShelfContent`
+6. **Writing the DB while Nickel runs**: date-added columns +
+   `Shelf`/`ShelfContent`
    writes from a second connection with `busy_timeout` must be safe on-device
    (Calibre only writes when USB-connected/Nickel idle). Fallback if not:
    perform writes immediately after the rescan's `pfmDoneProcessing`.
@@ -289,9 +299,11 @@ Auth: `Authorization: Bearer <token>` on every request.
 
 ```
 GET  {server}/api/agent/state?device=<serial>
-     → {"articles":[{bookmark_id,title,author,url,etag,action:"add|update|remove",updated}],
+     → {"articles":[{bookmark_id,title,author,url,etag,action:"add|update|remove",updated,created}],
         "next_cursor":null}
      url = absolute kepub download URL.
+     updated = last-modified (etag/change detection); created = date added to
+     Readeck (Kobo ___SyncTime/DateCreated/shelf sort).
 
 GET  {server}/api/kepub/{id}   → the .kepub.epub bytes.
 

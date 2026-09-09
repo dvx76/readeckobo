@@ -16,7 +16,8 @@ type AgentStateArticle struct {
 	URL        string `json:"url"` // absolute URL to /api/kepub/<id> (carries ?token=)
 	Etag       string `json:"etag"`
 	Action     string `json:"action"`  // "add" | "update" | "remove"
-	Updated    string `json:"updated"` // RFC3339
+	Updated    string `json:"updated"` // RFC3339 (last-modified; drives etag/change detection)
+	Created    string `json:"created"` // RFC3339 (date added to Readeck; drives Kobo ___SyncTime/DateCreated/shelf sort)
 }
 
 // AgentStateResponse is the state feed response. next_cursor stays null for

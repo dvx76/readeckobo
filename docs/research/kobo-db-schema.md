@@ -295,27 +295,53 @@ are the built-in smart shelves like Shortlist/Wishlist).
 
 ### 6.2 Which timestamp drives the "Date added"/"Recent" sort
 
-**Finding: it is `content.DateCreated`, not `content.DateAdded`.**
+**Finding (corrected 2026-09-09 for Libra 2 / 4.38.x): it is
+`content.___SyncTime`, not `content.DateCreated` — and the sort key must be
+Readeck `created`, not `updated`.**
 
-Evidence:
+The earlier version of this note claimed `DateCreated` (citing old calibre
+behaviour). Direct inspection of the current Kobo Utilities source
+(`koboutilities/features/metadata.py:do_update_metadata`, `set_sync_date`
+path) and davidfor's Libra 2 statements (MobileRead t=347000) corrects this:
+
+- "Date added" sorts by `content.___SyncTime`; "Recent" sorts by
+  `MAX(___SyncTime, DateLastRead)` (was `IFNULL(DateLastRead, ___SyncTime)`).
+- Kobo Utilities' "Update metadata in device library" → "Date added" writes
+  `___SyncTime` (`set_clause_columns.append("___SyncTime=?")`, sourced from
+  calibre Date/Modified/Published or a custom date column). The `DateCreated`
+  option in the same dialog is a *separate* "published date" mapping
+  (calibre `driver.py:3944-3947`: `pubdate → DateCreated`), shown on the book
+  details screen — not the sort key.
+- For collections, the "Date added" sort originally used
+  `ShelfContent.DateModified` (calibre `set_bookshelf` writes `gmtime()` there),
+  broke for a period ("seemingly random but consistent sort"), and was fixed
+  to use the book's date-added value — per davidfor, now `___SyncTime` as well.
+  Writing the article date to *both* columns covers old and new firmware.
+- `content.DateAdded` is the column the Pocket rows populate (MobileRead pocket
+  thread query selects `DateAdded`), i.e. it is used for store/Pocket metadata,
+  not the sideload sort.
+
+Evidence (pre-correction, kept for history):
 - Calibre's metadata sync maps the Calibre *pubdate* to `content.DateCreated`
-  (`driver.py:3944-3947`: `pubdate_string ... set_clause.append('DateCreated')`), and maps
-  `content.DateCreated` back to `kobo_metadata.pubdate` (`driver.py:2089-2097`).
-- Kobo Utilities' "Update metadata in device library" → "Date added" feature writes
-  `content.DateCreated` (`koboutilities/features/metadata.py:296-310`, `result['DateCreated']`
-  compared against `pubdate_string` and `set_clause_columns.append("DateCreated=?")`).
-- davidfor (Kobo Utilities author), MobileRead t=333040: "the date used [by the 'Recent'
-  sort] is when the book was imported by the device … the Metadata update function in my Kobo
-  Utilities plugin can set it"; confirmed by users: after setting it, "sorting by 'Date added'
-  in your kobo device will sort your books according to the parameter you selected".
-- `content.DateAdded` is the column the Pocket rows populate (MobileRead pocket thread query
-  selects `DateAdded`), i.e. it is used for store/Pocket metadata, not the sideload "recent" sort.
+  (`driver.py:3944-3947`), and maps `content.DateCreated` back to
+  `kobo_metadata.pubdate` (`driver.py:2089-2097`).
+- davidfor, MobileRead t=333040: "the date used [by the 'Recent' sort] is when
+  the book was imported by the device … the Metadata update function in my Kobo
+  Utilities plugin can set it"; confirmed by users: after setting it, "sorting
+  by 'Date added' in your kobo device will sort your books according to the
+  parameter you selected".
 
-**Implication for this project:** after rescanning an imported kepub, the agent should set the
-book row's `content.DateCreated` to the desired (Readeck "added") timestamp; the device's
-"Recent" / "Date added" view should then follow it. The `%Y-%m-%dT%H:%M:%SZ` format is what
-Calibre/Kobo Utilities write. ⚠️ Confirm on-device that a freshly *imported* kepub's
-"Date added" indeed reflects `DateCreated` (vs the WAL/file mtime) — see §11.
+**Implication for this project (the 2026-09-09 date-added bug):** the agent
+previously set `content.DateCreated = article.updated` once per import. That
+was wrong on two axes: wrong column (`___SyncTime` drives the sort) and wrong
+timestamp (`updated` moves on every edit/re-fetch, while Readeck's date-added
+is `created`). Bulk imports additionally collapsed to the same `___SyncTime`
+(import time) and the same `ShelfContent.DateModified` (sync time), so the
+Kobo order bore no relation to Readeck's. The fix sets
+`content.___SyncTime + content.DateCreated + ShelfContent.DateModified =
+bookmark.created` idempotently every pass (created is immutable, so
+re-ensuring is harmless and self-heals pre-fix devices). The
+`%Y-%m-%dT%H:%M:%SZ` format is what Calibre/Kobo Utilities write.
 
 ---
 
@@ -563,8 +589,11 @@ Tested on this box (2026-09-08, Go 1.24.5, linux/arm64), module under `/tmp/dbte
 2. **`StartOffset`/`EndOffset` counting units**: code points vs UTF-16 units; whether offsets are
    relative to the start span only or the whole chapter; whitespace handling. Create known
    highlights and inspect.
-3. **"Date added"/"Recent" source column**: evidence says `content.DateCreated`; confirm by
-   importing a kepub, setting `DateCreated` to an old timestamp, and checking the Recent sort.
+3. **"Date added"/"Recent" source columns**: now `content.___SyncTime` (+
+   `DateLastRead` for Recent) per §6.2 as corrected — confirm on-device that a
+   freshly imported kepub's "Date added" follows `___SyncTime` set to an old
+   timestamp, and that the collection sort does too (it should follow either
+   `___SyncTime` or `ShelfContent.DateModified`; the agent sets both).
    Also confirm whether `content.DateAdded` matters at all for sideloads.
 4. **Whether sideloaded `.kepub.epub` actually supports highlighting on 4.38** (kobolabs/epub-spec
    claims it disables note-keeping; kepubify/KoboTouchExtended assume it works). Test: sideload a

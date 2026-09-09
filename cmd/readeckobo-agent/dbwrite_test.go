@@ -136,7 +136,7 @@ func TestEnsureShelfLegacy(t *testing.T) {
 	if got := scanOne(t, db, `SELECT count(*) FROM Shelf WHERE Name = 'Legacy Shelf' AND _IsDeleted = 'false'`); got != "1" {
 		t.Fatalf("legacy shelf row = %s", got)
 	}
-	if err := addContentToShelf(context.Background(), db, "Legacy Shelf", "file:///x/book.kepub.epub", now); err != nil {
+	if err := addContentToShelf(context.Background(), db, "Legacy Shelf", "file:///x/book.kepub.epub", formatKoboTime(now)); err != nil {
 		t.Fatalf("legacy addContentToShelf: %v", err)
 	}
 	if got := scanOne(t, db, `SELECT _IsDeleted FROM ShelfContent WHERE ShelfName='Legacy Shelf' AND ContentId='file:///x/book.kepub.epub'`); got != "false" {
@@ -165,6 +165,72 @@ func TestSetDateCreated(t *testing.T) {
 	}
 	if err := setDateCreated(context.Background(), db, "file:///does/not/exist.kepub.epub", "2026-01-01T00:00:00Z"); err != sql.ErrNoRows {
 		t.Fatalf("missing row err = %v, want ErrNoRows", err)
+	}
+}
+
+// TestSetBookAddedDate asserts the date-added ensure writes both sort-relevant
+// columns (___SyncTime + DateCreated) and only targets book rows.
+func TestSetBookAddedDate(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := copyFixtureDB(t, dir)
+	db := openFixtureRW(t, dbPath)
+
+	contentID := "file:///mnt/onboard/.kobo/readeck/Readeck Article One.kepub.epub"
+	if err := setBookAddedDate(context.Background(), db, contentID, "2026-09-01T08:00:00Z"); err != nil {
+		t.Fatalf("setBookAddedDate: %v", err)
+	}
+	if got := scanOne(t, db, `SELECT DateCreated FROM content WHERE ContentID = ? AND VolumeIndex = -1`, contentID); got != "2026-09-01T08:00:00Z" {
+		t.Fatalf("DateCreated = %s", got)
+	}
+	if got := scanOne(t, db, `SELECT ___SyncTime FROM content WHERE ContentID = ? AND VolumeIndex = -1`, contentID); got != "2026-09-01T08:00:00Z" {
+		t.Fatalf("___SyncTime = %s", got)
+	}
+	if err := setBookAddedDate(context.Background(), db, contentID+"!!OEBPS/xhtml/ch001.xhtml", "2026-01-01T00:00:00Z"); err != sql.ErrNoRows {
+		t.Fatalf("chapter update err = %v, want ErrNoRows", err)
+	}
+	if err := setBookAddedDate(context.Background(), db, "file:///does/not/exist.kepub.epub", "2026-01-01T00:00:00Z"); err != sql.ErrNoRows {
+		t.Fatalf("missing row err = %v, want ErrNoRows", err)
+	}
+}
+
+// TestAddContentToShelfDateModified asserts the shelf membership upsert writes
+// the Readeck date-added (not the sync time) and converges existing rows.
+func TestAddContentToShelfDateModified(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := copyFixtureDB(t, dir)
+	db := openFixtureRW(t, dbPath)
+	ctx := context.Background()
+
+	shelf := "Readeck"
+	contentID := "file:///mnt/onboard/.kobo/readeck/Readeck Article One.kepub.epub"
+	// Pristine fixture already has a membership; converge it to the article date.
+	if err := addContentToShelf(ctx, db, shelf, contentID, "2026-09-01T08:00:00Z"); err != nil {
+		t.Fatalf("addContentToShelf: %v", err)
+	}
+	if got := scanOne(t, db, `SELECT DateModified FROM ShelfContent WHERE ShelfName = ? AND ContentId = ?`, shelf, contentID); got != "2026-09-01T08:00:00Z" {
+		t.Fatalf("DateModified = %s, want article created", got)
+	}
+	// Idempotent when already correct.
+	if err := addContentToShelf(ctx, db, shelf, contentID, "2026-09-01T08:00:00Z"); err != nil {
+		t.Fatalf("addContentToShelf idempotent: %v", err)
+	}
+	// New membership inserts with the article date.
+	if err := addContentToShelf(ctx, db, shelf, "file:///x/new.kepub.epub", "2026-08-15T12:30:00Z"); err != nil {
+		t.Fatalf("addContentToShelf insert: %v", err)
+	}
+	if got := scanOne(t, db, `SELECT DateModified FROM ShelfContent WHERE ShelfName = ? AND ContentId = ?`, shelf, "file:///x/new.kepub.epub"); got != "2026-08-15T12:30:00Z" {
+		t.Fatalf("inserted DateModified = %s", got)
+	}
+	// Deleted membership is revived with the article date.
+	execDB(t, db, `UPDATE ShelfContent SET _IsDeleted = 'true' WHERE ShelfName = ? AND ContentId = ?`, shelf, contentID)
+	if err := addContentToShelf(ctx, db, shelf, contentID, "2026-09-02T00:00:00Z"); err != nil {
+		t.Fatalf("addContentToShelf revive: %v", err)
+	}
+	if got := scanOne(t, db, `SELECT _IsDeleted FROM ShelfContent WHERE ShelfName = ? AND ContentId = ?`, shelf, contentID); got != "false" {
+		t.Fatalf("revived _IsDeleted = %s", got)
+	}
+	if got := scanOne(t, db, `SELECT DateModified FROM ShelfContent WHERE ShelfName = ? AND ContentId = ?`, shelf, contentID); got != "2026-09-02T00:00:00Z" {
+		t.Fatalf("revived DateModified = %s", got)
 	}
 }
 
@@ -227,5 +293,9 @@ func TestReadManagedBookRows(t *testing.T) {
 	}
 	if br.DateCreated != "2026-09-01T08:00:00Z" {
 		t.Errorf("DateCreated = %q", br.DateCreated)
+	}
+	// The fixture leaves ___SyncTime NULL (Nickel sets it on import).
+	if br.SyncTime != "" {
+		t.Errorf("SyncTime = %q, want empty in pristine fixture", br.SyncTime)
 	}
 }

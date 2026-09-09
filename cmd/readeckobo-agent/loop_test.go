@@ -12,7 +12,10 @@ import (
 // articleA/B mirror the fixture books after path rewriting (see
 // testhelpers_test.go): book A is "Readeck Article One" (3 highlights + 1
 // note on device), book B is "Project Hail Mary" (1 highlight).
-func articleA(etag, updated string) Article {
+// updated is the content version (etag driver); created is the stable Readeck
+// date-added that drives the Kobo sort. They are deliberately distinct so the
+// tests prove the device uses created, not updated.
+func articleA(etag, updated, created string) Article {
 	return Article{
 		BookmarkID: bookAID,
 		Title:      "Readeck Article One",
@@ -21,10 +24,11 @@ func articleA(etag, updated string) Article {
 		ETag:       etag,
 		Action:     "update",
 		Updated:    updated,
+		Created:    created,
 	}
 }
 
-func articleB(etag, updated string) Article {
+func articleB(etag, updated, created string) Article {
 	return Article{
 		BookmarkID: bookBID,
 		Title:      "Project Hail Mary",
@@ -33,6 +37,7 @@ func articleB(etag, updated string) Article {
 		ETag:       etag,
 		Action:     "add",
 		Updated:    updated,
+		Created:    created,
 	}
 }
 
@@ -53,18 +58,18 @@ func fullArticle(a Article, srv string) Article {
 
 // TestSyncLoopEndToEnd drives the complete agent loop against a fixture-based
 // device DB across four passes: import + highlight upload, content update
-// (etag change must NOT re-stamp DateCreated), removal, and a second import
-// with its own highlight. It runs with --no-rescan semantics (Nickel is
-// simulated by pre-seeded content rows, which is exactly the contract: the
-// agent never inserts content rows itself).
+// (etag change must NOT move the date-added back to updated), removal, and a
+// second import with its own highlight. It runs with --no-rescan semantics
+// (Nickel is simulated by pre-seeded content rows, which is exactly the
+// contract: the agent never inserts content rows itself).
 func TestSyncLoopEndToEnd(t *testing.T) {
 	env := newLoopEnv(t)
 
-	a1 := fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z"), env.server.URL)
+	a1 := fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z", "2026-09-01T08:00:00Z"), env.server.URL)
 	env.setKepub(bookAID, "KEPUB-A-V1")
 	env.setState(a1)
 
-	// --- pass 1: import A, stamp DateCreated, create collection, upload 3 ---
+	// --- pass 1: import A, ensure date-added from created, create collection, upload 3 ---
 	if err := env.runSync(t); err != nil {
 		t.Fatalf("pass 1: %v", err)
 	}
@@ -79,10 +84,18 @@ func TestSyncLoopEndToEnd(t *testing.T) {
 	}
 
 	db := openFixtureRW(t, env.koboDB)
-	// DateCreated stamped exactly once with the article.updated value.
+	// Date-added columns converge to article.created (not updated).
 	if got := scanOne(t, db, `SELECT DateCreated FROM content WHERE ContentID = ? AND VolumeIndex = -1`,
-		env.volumeID(fileA)); got != "2026-09-07T10:00:00Z" {
-		t.Fatalf("DateCreated = %q, want article updated", got)
+		env.volumeID(fileA)); got != "2026-09-01T08:00:00Z" {
+		t.Fatalf("DateCreated = %q, want article created", got)
+	}
+	if got := scanOne(t, db, `SELECT ___SyncTime FROM content WHERE ContentID = ? AND VolumeIndex = -1`,
+		env.volumeID(fileA)); got != "2026-09-01T08:00:00Z" {
+		t.Fatalf("___SyncTime = %q, want article created", got)
+	}
+	if got := scanOne(t, db, `SELECT DateModified FROM ShelfContent WHERE ShelfName = 'Readeck' AND ContentId = ?`,
+		env.volumeID(fileA)); got != "2026-09-01T08:00:00Z" {
+		t.Fatalf("ShelfContent.DateModified = %q, want article created", got)
 	}
 	// Shelf + membership created by the agent (we wiped them in setup).
 	if got := scanOne(t, db, `SELECT count(*) FROM Shelf WHERE Name = 'Readeck' AND _IsDeleted = 'false'`); got != "1" {
@@ -140,10 +153,10 @@ func TestSyncLoopEndToEnd(t *testing.T) {
 		}
 	}
 
-	// --- pass 2: same article, new etag → re-download, but DateCreated must
-	// NOT be re-stamped and nothing new is uploaded ---
+	// --- pass 2: same article, new etag (updated moves, created stable) →
+	// re-download, but the date-added must NOT move and nothing new is uploaded ---
 	env.setKepub(bookAID, "KEPUB-A-V2")
-	env.setState(fullArticle(articleA("etag-2", "2026-09-08T09:00:00Z"), env.server.URL))
+	env.setState(fullArticle(articleA("etag-2", "2026-09-08T09:00:00Z", "2026-09-01T08:00:00Z"), env.server.URL))
 	if err := env.runSync(t); err != nil {
 		t.Fatalf("pass 2: %v", err)
 	}
@@ -152,8 +165,12 @@ func TestSyncLoopEndToEnd(t *testing.T) {
 		t.Fatalf("pass 2: kepub not updated: %v", err)
 	}
 	if got := scanOne(t, db, `SELECT DateCreated FROM content WHERE ContentID = ? AND VolumeIndex = -1`,
-		env.volumeID(fileA)); got != "2026-09-07T10:00:00Z" {
-		t.Fatalf("pass 2: DateCreated re-stamped to %q", got)
+		env.volumeID(fileA)); got != "2026-09-01T08:00:00Z" {
+		t.Fatalf("pass 2: DateCreated moved to %q, want stable created", got)
+	}
+	if got := scanOne(t, db, `SELECT ___SyncTime FROM content WHERE ContentID = ? AND VolumeIndex = -1`,
+		env.volumeID(fileA)); got != "2026-09-01T08:00:00Z" {
+		t.Fatalf("pass 2: ___SyncTime moved to %q, want stable created", got)
 	}
 	if got := env.postCount(); got != 1 {
 		t.Fatalf("pass 2: annotation POSTs = %d, want still 1", got)
@@ -177,13 +194,17 @@ func TestSyncLoopEndToEnd(t *testing.T) {
 
 	// --- pass 4: import B (fresh book, own highlight) ---
 	env.setKepub(bookBID, "KEPUB-B-V1")
-	env.setState(fullArticle(articleB("etag-b1", "2026-09-05T14:30:00Z"), env.server.URL))
+	env.setState(fullArticle(articleB("etag-b1", "2026-09-05T14:30:00Z", "2026-08-15T12:30:00Z"), env.server.URL))
 	if err := env.runSync(t); err != nil {
 		t.Fatalf("pass 4: %v", err)
 	}
 	if got := scanOne(t, db, `SELECT DateCreated FROM content WHERE ContentID = ? AND VolumeIndex = -1`,
-		env.volumeID(fileB)); got != "2026-09-05T14:30:00Z" {
-		t.Fatalf("pass 4: B DateCreated = %q", got)
+		env.volumeID(fileB)); got != "2026-08-15T12:30:00Z" {
+		t.Fatalf("pass 4: B DateCreated = %q, want article created", got)
+	}
+	if got := scanOne(t, db, `SELECT ___SyncTime FROM content WHERE ContentID = ? AND VolumeIndex = -1`,
+		env.volumeID(fileB)); got != "2026-08-15T12:30:00Z" {
+		t.Fatalf("pass 4: B ___SyncTime = %q, want article created", got)
 	}
 	if got := scanOne(t, db, `SELECT count(*) FROM ShelfContent WHERE ShelfName = 'Readeck' AND ContentId = ?`,
 		env.volumeID(fileB)); got != "1" {
@@ -207,6 +228,79 @@ func mustLoadIndex(t *testing.T, env *loopEnv) *indexStore {
 	return idx
 }
 
+// TestMaintainCollectionSelfHeals covers the date-added migration: a book
+// imported before the fix carries the old wrong values (DateCreated = updated
+// at import time, ___SyncTime = Nickel's import time, shelf DateModified =
+// sync time). The next pass must converge all three to article.created even
+// though the index already says "imported".
+func TestMaintainCollectionSelfHeals(t *testing.T) {
+	env := newLoopEnv(t)
+	env.setKepub(bookAID, "KEPUB-A-V1")
+	env.setState(fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z", "2026-09-01T08:00:00Z"), env.server.URL))
+	if err := env.runSync(t); err != nil {
+		t.Fatalf("pass 1: %v", err)
+	}
+
+	db := openFixtureRW(t, env.koboDB)
+	// Corrupt the row to the pre-fix shape: updated-based DateCreated, import
+	// time ___SyncTime, sync-time shelf membership.
+	execDB(t, db, `UPDATE content SET DateCreated = ?, ___SyncTime = ? WHERE ContentID = ? AND VolumeIndex = -1`,
+		"2026-09-07T10:00:00Z", "2026-09-10T12:00:00Z", env.volumeID(fileA))
+	execDB(t, db, `UPDATE ShelfContent SET DateModified = ? WHERE ShelfName = 'Readeck' AND ContentId = ?`,
+		"2026-09-10T12:00:00Z", env.volumeID(fileA))
+	// Simulate an old index without the created field (pre-fix sidecar).
+	idx := mustLoadIndex(t, env)
+	if e, ok := idx.get(fileA); ok {
+		e.Created = ""
+		e.State = stateImported
+		idx.set(e)
+		if err := idx.save(); err != nil {
+			t.Fatalf("index save: %v", err)
+		}
+	}
+
+	// Pass 2 with the same feed must heal all three columns and backfill the
+	// index, without re-downloading (same etag).
+	if err := env.runSync(t); err != nil {
+		t.Fatalf("pass 2: %v", err)
+	}
+	if got := scanOne(t, db, `SELECT DateCreated FROM content WHERE ContentID = ? AND VolumeIndex = -1`,
+		env.volumeID(fileA)); got != "2026-09-01T08:00:00Z" {
+		t.Errorf("healed DateCreated = %q, want created", got)
+	}
+	if got := scanOne(t, db, `SELECT ___SyncTime FROM content WHERE ContentID = ? AND VolumeIndex = -1`,
+		env.volumeID(fileA)); got != "2026-09-01T08:00:00Z" {
+		t.Errorf("healed ___SyncTime = %q, want created", got)
+	}
+	if got := scanOne(t, db, `SELECT DateModified FROM ShelfContent WHERE ShelfName = 'Readeck' AND ContentId = ?`,
+		env.volumeID(fileA)); got != "2026-09-01T08:00:00Z" {
+		t.Errorf("healed ShelfContent.DateModified = %q, want created", got)
+	}
+	healed := mustLoadIndex(t, env)
+	if e, ok := healed.get(fileA); !ok || e.Created == "" {
+		t.Errorf("index Created not backfilled: %+v (ok=%v)", e, ok)
+	} else if e.State != stateImported {
+		t.Errorf("index state = %q, want imported", e.State)
+	}
+}
+
+// TestDesiredCreatedFallback covers the timestamp resolution: feed created
+// wins, else index created, else legacy updated (old servers).
+func TestDesiredCreatedFallback(t *testing.T) {
+	feed := map[string]Article{
+		"b1": {BookmarkID: "b1", Created: "2026-09-01T08:00:00Z", Updated: "2026-09-07T10:00:00Z"},
+	}
+	if got := desiredCreated(indexEntry{BookmarkID: "b1", Created: "2026-08-01T00:00:00Z"}, feed); got != "2026-09-01T08:00:00Z" {
+		t.Errorf("feed should win, got %q", got)
+	}
+	if got := desiredCreated(indexEntry{BookmarkID: "b9", Created: "2026-08-01T00:00:00Z", Updated: "2026-09-07T00:00:00Z"}, feed); got != "2026-08-01T00:00:00Z" {
+		t.Errorf("index created should win when absent from feed, got %q", got)
+	}
+	if got := desiredCreated(indexEntry{BookmarkID: "b9", Updated: "2026-09-07T00:00:00Z"}, feed); got != "2026-09-07T00:00:00Z" {
+		t.Errorf("legacy updated fallback, got %q", got)
+	}
+}
+
 // TestSyncLoopMissedRemoveSweep covers the once-only remove emission: the
 // server sends each remove exactly once and then drops its ledger row, so a
 // device that missed that emission (offline, or the remove was consumed by a
@@ -221,8 +315,8 @@ func TestSyncLoopMissedRemoveSweep(t *testing.T) {
 
 	// Pass 1: both articles live → both files on disk and managed.
 	env.setState(
-		fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z"), env.server.URL),
-		fullArticle(articleB("etag-b1", "2026-09-05T14:30:00Z"), env.server.URL),
+		fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z", "2026-09-01T08:00:00Z"), env.server.URL),
+		fullArticle(articleB("etag-b1", "2026-09-05T14:30:00Z", "2026-08-15T12:30:00Z"), env.server.URL),
 	)
 	if err := env.runSync(t); err != nil {
 		t.Fatalf("pass 1: %v", err)
@@ -234,7 +328,7 @@ func TestSyncLoopMissedRemoveSweep(t *testing.T) {
 
 	// Pass 2: A vanishes from the feed with NO explicit remove (the missed
 	// emission). The sweep must delete the file and tombstone the index.
-	env.setState(fullArticle(articleB("etag-b1", "2026-09-05T14:30:00Z"), env.server.URL))
+	env.setState(fullArticle(articleB("etag-b1", "2026-09-05T14:30:00Z", "2026-08-15T12:30:00Z"), env.server.URL))
 	if err := env.runSync(t); err != nil {
 		t.Fatalf("pass 2: %v", err)
 	}
@@ -271,7 +365,7 @@ func TestSyncLoopMissedRemoveSweep(t *testing.T) {
 func TestSyncLoopServerOutcomes(t *testing.T) {
 	env := newLoopEnv(t)
 	env.setKepub(bookAID, "KEPUB-A")
-	env.setState(fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z"), env.server.URL))
+	env.setState(fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z", "2026-09-01T08:00:00Z"), env.server.URL))
 	env.resultFn = func(rowID string) annotationResult {
 		switch rowID {
 		case rowHlA1:
@@ -325,7 +419,7 @@ func TestCLIOnce(t *testing.T) {
 	env := newLoopEnv(t)
 	env.writeConfig(nil)
 	env.setKepub(bookAID, "KEPUB-A")
-	env.setState(fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z"), env.server.URL))
+	env.setState(fullArticle(articleA("etag-1", "2026-09-07T10:00:00Z", "2026-09-01T08:00:00Z"), env.server.URL))
 
 	args := []string{
 		"--once",

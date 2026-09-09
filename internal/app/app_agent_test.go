@@ -263,15 +263,16 @@ func decodeAnnotations(t *testing.T, rr *httptest.ResponseRecorder) models.Agent
 // ---------------------------------------------------------------------------
 
 func TestHandleAgentState(t *testing.T) {
+	t0 := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)
 	t1 := time.Date(2026, 9, 1, 8, 0, 0, 123000000, time.UTC)
 	t2 := time.Date(2026, 9, 2, 8, 0, 0, 0, time.UTC)
 	t3 := time.Date(2026, 9, 3, 8, 0, 0, 0, time.UTC)
 
 	mock := newReadeckMock(fixtureArticle(t))
 	mock.setBookmarks(
-		readeck.Bookmark{ID: "bm-1", Title: "Article One", Authors: []string{"Ada Example"}, Updated: t1, IsArchived: false},
-		readeck.Bookmark{ID: "bm-2", Title: "Article Two", Updated: t2, IsArchived: false},
-		readeck.Bookmark{ID: "bm-video", Title: "Video One", Updated: t2, IsArchived: false, Type: "video"},
+		readeck.Bookmark{ID: "bm-1", Title: "Article One", Authors: []string{"Ada Example"}, Created: t0, Updated: t1, IsArchived: false},
+		readeck.Bookmark{ID: "bm-2", Title: "Article Two", Created: t0, Updated: t2, IsArchived: false},
+		readeck.Bookmark{ID: "bm-video", Title: "Video One", Created: t0, Updated: t2, IsArchived: false, Type: "video"},
 	)
 	app, _ := newAgentApp(t, mock)
 	fingerprint := ""
@@ -301,8 +302,8 @@ func TestHandleAgentState(t *testing.T) {
 			if a.Action != "add" {
 				t.Errorf("%s action = %q, want add", id, a.Action)
 			}
-			if a.Etag == "" || a.Updated == "" {
-				t.Errorf("%s missing etag/updated: %+v", id, a)
+			if a.Etag == "" || a.Updated == "" || a.Created == "" {
+				t.Errorf("%s missing etag/updated/created: %+v", id, a)
 			}
 			wantURL := "http://example.com/api/kepub/" + id + "?token=" + url.QueryEscape(agentDeviceToken)
 			if !strings.HasSuffix(a.URL, "/api/kepub/"+id+"?token="+url.QueryEscape(agentDeviceToken)) {
@@ -311,6 +312,14 @@ func TestHandleAgentState(t *testing.T) {
 		}
 		if got := byID["bm-1"].Etag; got != t1.Format(time.RFC3339Nano) {
 			t.Errorf("bm-1 etag = %q, want updated timestamp %q", got, t1.Format(time.RFC3339Nano))
+		}
+		// Created drives the Kobo date-added sort and must be the bookmark's
+		// created timestamp, not updated.
+		if got := byID["bm-1"].Created; got != t0.Format(time.RFC3339Nano) {
+			t.Errorf("bm-1 created = %q, want %q", got, t0.Format(time.RFC3339Nano))
+		}
+		if got := byID["bm-1"].Updated; got != t1.Format(time.RFC3339Nano) {
+			t.Errorf("bm-1 updated = %q, want %q", got, t1.Format(time.RFC3339Nano))
 		}
 		fingerprint = byID["bm-1"].Etag
 	})
@@ -354,6 +363,11 @@ func TestHandleAgentState(t *testing.T) {
 		}
 		if bm1.Etag == fingerprint {
 			t.Error("etag should change when updated changes")
+		}
+		// Created is stable across content updates: the Kobo sort key must not
+		// move when the bookmark is edited.
+		if bm1.Created != t0.Format(time.RFC3339Nano) {
+			t.Errorf("bm-1 created = %q, want stable %q", bm1.Created, t0.Format(time.RFC3339Nano))
 		}
 		for i := range resp.Articles {
 			if resp.Articles[i].BookmarkID == "bm-2" && resp.Articles[i].Action != "add" {
@@ -864,5 +878,33 @@ func TestHandleAgentAnnotationsVideoSkipped(t *testing.T) {
 	}
 	if mock.createCalls != 0 {
 		t.Errorf("createCalls = %d, want 0 (no annotation on a video)", mock.createCalls)
+	}
+}
+
+func TestBookmarkCreatedFallback(t *testing.T) {
+	created := time.Date(2026, 8, 31, 8, 0, 0, 0, time.UTC)
+	updated := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
+
+	bm := &readeck.Bookmark{Created: created, Updated: updated}
+	if got := bookmarkCreated(bm); got != created.UTC().Format(time.RFC3339Nano) {
+		t.Errorf("bookmarkCreated = %q, want created", got)
+	}
+	if got := bookmarkUpdated(bm); got != updated.UTC().Format(time.RFC3339Nano) {
+		t.Errorf("bookmarkUpdated = %q, want updated", got)
+	}
+
+	// Created zero falls back to Updated so old Readeck rows still sort.
+	bm = &readeck.Bookmark{Updated: updated}
+	if got := bookmarkCreated(bm); got != updated.UTC().Format(time.RFC3339Nano) {
+		t.Errorf("bookmarkCreated fallback = %q, want updated", got)
+	}
+
+	// Both zero → empty (etag falls back to a hash downstream).
+	bm = &readeck.Bookmark{}
+	if got := bookmarkCreated(bm); got != "" {
+		t.Errorf("bookmarkCreated empty = %q, want empty", got)
+	}
+	if got := bookmarkUpdated(bm); got != "" {
+		t.Errorf("bookmarkUpdated empty = %q, want empty", got)
 	}
 }

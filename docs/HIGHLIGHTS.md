@@ -130,7 +130,7 @@ Auth: the agent authenticates with `Authorization: Bearer <token>` where
 - Articles you archive/delete in Readeck are removed from the device on the
   next sync (the file is deleted; stale library rows clear on the next
   rescan).
-- Device-side DB writes (`DateCreated`, shelf) happen while Nickel is running —
+- Device-side DB writes (date-added columns, shelf) happen while Nickel is running —
   safe in the agent's design, but still to be confirmed on real hardware
   (see the checklist below).
 
@@ -177,10 +177,11 @@ kepubs and re-deduplicates highlights (harmless).
 3. **One end-to-end highlight** — make a highlight on a paragraph, run
    `readeckobo-agent --once`, and confirm it appears in Readeck at the correct
    spot. This validates the whole offset-mapping pipeline on real firmware.
-4. **Date added sort** — set an old timestamp on a fresh import and confirm
-   the device's Recent/"Date added" sort follows it. Also confirm an edited
-   article (etag change) updates the existing library row instead of adding a
-   duplicate.
+4. **Date added sort** — sort the Readeck collection by "Date added" and
+   confirm the order matches Readeck's date-added order (the device keys on
+   `___SyncTime`/`ShelfContent.DateModified`, both set to `bookmark.created`).
+   Also confirm an edited article (etag change, `updated` moves but `created`
+   is stable) keeps its position instead of jumping to the top.
 5. **Collection/shelf shape** — after a sync, confirm the Readeck shelf shows
    up in the library UI (and note the firmware's `DbVersion` if you can see
    it, so the agent's shelf-write code can be pinned to it).
