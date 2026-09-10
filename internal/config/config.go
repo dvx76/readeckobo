@@ -21,12 +21,12 @@ type ConfigReadeck struct {
 }
 
 type Config struct {
-	Readeck  ConfigReadeck `koanf:"readeck"`
-	Server   struct {
+	Readeck ConfigReadeck `koanf:"readeck"`
+	Server  struct {
 		Port int `koanf:"port" validate:"min=1,max=65535"`
 	} `koanf:"server"`
-	Users    []User        `koanf:"users" validate:"required,min=1,dive"`
-	LogLevel string        `koanf:"log_level" validate:"oneof=error warn info debug"`
+	Users    []User `koanf:"users" validate:"required,min=1,dive"`
+	LogLevel string `koanf:"log_level" validate:"oneof=error warn info debug"`
 }
 
 func (c *Config) Validate() error {

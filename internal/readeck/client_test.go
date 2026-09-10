@@ -80,7 +80,7 @@ func TestGetBookmarksSync(t *testing.T) {
 			t.Errorf("Expected Authorization header 'Bearer test-token', got '%s'", r.Header.Get("Authorization"))
 		}
 
-				mockResponse := []BookmarkSync{
+		mockResponse := []BookmarkSync{
 			{ID: "1", Time: time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC), Type: "update"},
 		}
 		if err := json.NewEncoder(w).Encode(mockResponse); err != nil {
@@ -342,7 +342,7 @@ func TestUpdateBookmark(t *testing.T) {
 		}
 
 		var updates map[string]interface{}
-				if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
 			t.Fatalf("Failed to decode request body: %v", err)
 		}
 		if updates["is_archived"] != true {
@@ -388,18 +388,18 @@ func TestCreateBookmark(t *testing.T) {
 		}
 
 		var body map[string]string
-				if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("Failed to decode request body: %v", err)
 		}
 		if body["url"] != "http://example.com/new" {
 			t.Errorf("Expected URL 'http://example.com/new', got '%s'", body["url"])
 		}
-		        w.WriteHeader(http.StatusCreated)
-			}))
-			defer server.Close()
-		
-			client, _ := NewClient(server.URL, "test-token", testLogger, nil)
-			ctx := context.Background()
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer server.Close()
+
+	client, _ := NewClient(server.URL, "test-token", testLogger, nil)
+	ctx := context.Background()
 
 	err := client.CreateBookmark(ctx, "http://example.com/new")
 	if err != nil {

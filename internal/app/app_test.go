@@ -467,6 +467,7 @@ func TestHandleKoboGet(t *testing.T) {
 		})
 	}
 }
+
 // koboDownloadTestCase defines the structure for test cases in TestHandleKoboDownload.
 type koboDownloadTestCase struct {
 	name           string
@@ -932,5 +933,3 @@ func TestHandleConvertImage(t *testing.T) {
 		}
 	})
 }
-
-

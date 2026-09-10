@@ -396,9 +396,9 @@ func (a *App) HandleKoboDownload(w http.ResponseWriter, r *http.Request) {
 
 	var req models.KoboDownloadRequest
 	if err := json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&req); err != nil {
-                sanitized := strings.ReplaceAll(string(bodyBytes), ";", "&")
-                r.Body = io.NopCloser(strings.NewReader(sanitized))
-                r.ContentLength = int64(len(sanitized))
+		sanitized := strings.ReplaceAll(string(bodyBytes), ";", "&")
+		r.Body = io.NopCloser(strings.NewReader(sanitized))
+		r.ContentLength = int64(len(sanitized))
 		if err := r.ParseForm(); err != nil {
 			http.Error(w, "Invalid request body or form data", http.StatusBadRequest)
 			a.Logger.Errorf("Error decoding /api/kobo/download request: %v, URL: %s, Params: %v", err, r.URL.Path, r.URL.Query())
@@ -829,7 +829,7 @@ func (a *App) HandleDumpAndForward(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Failed to forward request", http.StatusBadGateway)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -844,15 +844,15 @@ func (a *App) HandleDumpAndForward(w http.ResponseWriter, r *http.Request) {
 			gr, err := gzip.NewReader(bytes.NewReader(respBody))
 			if err == nil {
 				decompressed, err = io.ReadAll(gr)
-				gr.Close()
+				_ = gr.Close()
 			}
 			if err == nil {
 				rewritten := strings.ReplaceAll(string(decompressed), "https://www.instapaper.com", proxyBase)
 				a.Logger.Debugf("Rewrote initialization response: %s", rewritten)
 				var buf bytes.Buffer
 				gw := gzip.NewWriter(&buf)
-				gw.Write([]byte(rewritten))
-				gw.Close()
+				_, _ = gw.Write([]byte(rewritten))
+				_ = gw.Close()
 				respBody = buf.Bytes()
 			}
 		} else {
@@ -869,5 +869,5 @@ func (a *App) HandleDumpAndForward(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(respBody)))
 	w.WriteHeader(resp.StatusCode)
-	w.Write(respBody)
+	_, _ = w.Write(respBody)
 }

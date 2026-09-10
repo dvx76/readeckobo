@@ -24,10 +24,10 @@ const (
 
 // Client represents a Readeck API client.
 type Client struct {
-	BaseURL    *url.URL
+	BaseURL     *url.URL
 	AccessToken string
-	HTTPClient *http.Client
-	Logger     *logger.Logger // New field
+	HTTPClient  *http.Client
+	Logger      *logger.Logger // New field
 }
 
 // NewClient creates a new Readeck API client.
@@ -54,10 +54,10 @@ func NewClient(baseURL string, accessToken string, logger *logger.Logger, httpCl
 	}
 
 	return &Client{
-		BaseURL:    parsedURL,
+		BaseURL:     parsedURL,
 		AccessToken: accessToken,
-		HTTPClient: httpClient,
-		Logger: logger,
+		HTTPClient:  httpClient,
+		Logger:      logger,
 	}, nil
 }
 
@@ -81,19 +81,19 @@ func (c *Client) doRequest(ctx context.Context, method, path string, queryParams
 	}
 
 	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
-	    if body != nil {
-	        req.Header.Set("Content-Type", "application/json")
-	    }
-	
-	    resp, err := c.HTTPClient.Do(req)
-	    if err != nil {
-	        return "", fmt.Errorf("failed to execute request: %w", err)
-	    }
-	    defer func() { _ = resp.Body.Close() }()
-	
-	    if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-	        return "", &APIError{StatusCode: resp.StatusCode, Message: resp.Status}
-	    }
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.HTTPClient.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", &APIError{StatusCode: resp.StatusCode, Message: resp.Status}
+	}
 	if v != nil {
 		if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
 			return "", fmt.Errorf("failed to decode response body: %w", err)
@@ -354,7 +354,7 @@ func (c *Client) SyncBookmarksContent(ctx context.Context, ids []string) (map[st
 	}
 
 	requestBody := map[string]any{
-		"id":             ids,
+		"id":              ids,
 		"resource_prefix": "%/img",
 		"sort":            []string{"created"},
 		"with_html":       false,
@@ -417,7 +417,7 @@ func (c *Client) GetBookmarkArticle(ctx context.Context, id string) (string, err
 // UpdateBookmark updates a bookmark.
 func (c *Client) UpdateBookmark(ctx context.Context, id string, updates map[string]any) error {
 	path := fmt.Sprintf("/api/bookmarks/%s", id)
-		_, err := c.doRequest(ctx, http.MethodPatch, path, nil, updates, nil)
+	_, err := c.doRequest(ctx, http.MethodPatch, path, nil, updates, nil)
 	if err != nil {
 		if apiErr, ok := err.(*APIError); ok && apiErr.StatusCode == http.StatusNotFound {
 			c.Logger.Infof("Bookmark with ID '%s' not found on Readeck server. Treating as a successful action for the Kobo client.", id)

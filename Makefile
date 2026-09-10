@@ -24,6 +24,15 @@ vendor:
 	go mod tidy
 	go mod vendor
 
+# Check formatting (vendored deps are intentionally excluded: vendor/ is not
+# gofmt-clean by design, and it is gitignored/regenerated).
+fmt:
+	@unformatted="$$(git ls-files '*.go' ':!vendor/**' | xargs gofmt -l)"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "gofmt needed in:"; echo "$$unformatted"; exit 1; \
+	fi; \
+	echo "All tracked Go files are gofmt-clean"
+
 # Run all checks
 ci: lint test
 
